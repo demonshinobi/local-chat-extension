@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "Local Network Chat",
+  "version": "1.0",
+  "description": "Encrypted chat over local network using WebSocket",
+  "permissions": [
+    "storage"
+  ],
+  "host_permissions": [
+    "http://localhost/*"
+  ],
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "background": {
+    "service_worker": "background.js"
+  }
+}

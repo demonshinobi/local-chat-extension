@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Local Network Chat</title>
+  <style>
+    body {
+      width: 300px;
+      padding: 10px;
+      font-family: Arial, sans-serif;
+    }
+    #messages {
+      height: 300px;
+      border: 1px solid #ccc;
+      margin-bottom: 10px;
+      padding: 10px;
+      overflow-y: auto;
+    }
+    #input-area {
+      display: flex;
+      gap: 5px;
+    }
+    #message-input {
+      flex-grow: 1;
+    }
+    .message {
+      margin-bottom: 5px;
+      word-wrap: break-word;
+    }
+    .message.sent {
+      color: blue;
+    }
+    .message.received {
+      color: green;
+    }
+  </style>
+</head>
+<body>
+  <div id="connection-status">Not Connected</div>
+  <div id="messages"></div>
+  <div id="input-area">
+    <input type="text" id="message-input" placeholder="Type your message...">
+    <button id="send-button">Send</button>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>
