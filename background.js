@@ -53,15 +53,44 @@ let ws;
 let encryptionKey;
 let reconnectAttempts = 0;
 let pingInterval;
+let serverIp = null;
+const pendingMessages = new Map(); // Track messages waiting for delivery confirmation
+
+// Store the server IP in chrome.storage
+function saveServerIp(ip) {
+  chrome.storage.local.set({ serverIp: ip });
+}
+
+// Get the stored server IP
+async function getServerIp() {
+  const result = await chrome.storage.local.get('serverIp');
+  return result.serverIp;
+}
+
+// Generate unique message ID
+function generateMessageId() {
+  return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+}
 
 // Connect to WebSocket server
-function connect() {
+async function connect() {
   if (ws && ws.readyState !== WebSocket.CLOSED) {
     console.log('Connection already exists');
     return;
   }
 
-  ws = new WebSocket('ws://localhost:8080');
+  // Try to get stored server IP
+  const storedIp = await getServerIp();
+  if (!storedIp) {
+    chrome.runtime.sendMessage({ 
+      type: 'connectionStatus', 
+      status: 'error',
+      message: 'No server IP found. Please restart the server.'
+    });
+    return;
+  }
+
+  ws = new WebSocket(`ws://${storedIp}:8080`);
   
   ws.onopen = async () => {
     // Reset reconnect attempts on successful connection
@@ -70,42 +99,89 @@ function connect() {
     // Generate new encryption key when connection established
     encryptionKey = await generateKey();
     
-    // Notify popup that connection is ready
-    chrome.runtime.sendMessage({ type: 'connectionStatus', status: 'connected' });
-
-    // Setup ping-pong to keep connection alive
+    // Setup ping interval
+    clearInterval(pingInterval);
     pingInterval = setInterval(() => {
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: 'ping' }));
       }
-    }, 30000);
+    }, 15000);
+
+    // Notify popup that connection is ready
+    chrome.runtime.sendMessage({ 
+      type: 'connectionStatus', 
+      status: 'connected',
+      serverIp: storedIp
+    });
   };
 
   ws.onmessage = async (event) => {
     try {
-      // Check if message is a ping response
-      if (event.data === '{"type":"pong"}') {
+      // First try to parse as JSON for control messages
+      const data = JSON.parse(event.data);
+      
+      if (data.type === 'system' && data.message) {
+        // Extract IP from welcome message
+        const ipMatch = data.message.match(/at\s+(\d+\.\d+\.\d+\.\d+):/);
+        if (ipMatch) {
+          serverIp = ipMatch[1];
+          saveServerIp(serverIp);
+        }
+        return;
+      }
+
+      if (data.type === 'pong') {
         console.log('Received pong from server');
         return;
       }
 
-      // Handle normal messages
-      const encryptedData = new Uint8Array(await event.data.arrayBuffer());
-      const decryptedMessage = await decryptMessage(encryptionKey, encryptedData);
-      
-      // Send decrypted message to popup
-      chrome.runtime.sendMessage({
-        type: 'messageReceived',
-        message: decryptedMessage
-      });
+      if (data.type === 'delivered') {
+        // Handle delivery confirmation
+        const pendingMsg = pendingMessages.get(data.messageId);
+        if (pendingMsg) {
+          pendingMessages.delete(data.messageId);
+          chrome.runtime.sendMessage({
+            type: 'messageDelivered',
+            messageId: data.messageId,
+            timestamp: data.timestamp
+          });
+        }
+        return;
+      }
+
+      // If it's a chat message, decrypt and forward
+      if (data.type === 'chat') {
+        const encryptedData = new Uint8Array(await data.content.arrayBuffer());
+        const decryptedMessage = await decryptMessage(encryptionKey, encryptedData);
+        chrome.runtime.sendMessage({
+          type: 'messageReceived',
+          message: decryptedMessage,
+          from: data.from,
+          timestamp: data.timestamp
+        });
+      }
+
     } catch (error) {
-      console.error('Error processing received message:', error);
+      // If not JSON, treat as encrypted message
+      try {
+        const encryptedData = new Uint8Array(await event.data.arrayBuffer());
+        const decryptedMessage = await decryptMessage(encryptionKey, encryptedData);
+        chrome.runtime.sendMessage({
+          type: 'messageReceived',
+          message: decryptedMessage
+        });
+      } catch (error) {
+        console.error('Error processing received message:', error);
+      }
     }
   };
 
   ws.onclose = () => {
     clearInterval(pingInterval);
-    chrome.runtime.sendMessage({ type: 'connectionStatus', status: 'disconnected' });
+    chrome.runtime.sendMessage({ 
+      type: 'connectionStatus', 
+      status: 'disconnected' 
+    });
     
     // Try to reconnect after a delay with exponential backoff
     const backoff = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000);
@@ -116,7 +192,11 @@ function connect() {
 
   ws.onerror = (error) => {
     console.error('WebSocket error:', error);
-    chrome.runtime.sendMessage({ type: 'connectionStatus', status: 'error' });
+    chrome.runtime.sendMessage({ 
+      type: 'connectionStatus', 
+      status: 'error',
+      message: error.message
+    });
   };
 }
 
@@ -125,12 +205,50 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'sendMessage' && ws && ws.readyState === WebSocket.OPEN) {
     (async () => {
       try {
+        const messageId = generateMessageId();
         const encryptedData = await encryptMessage(encryptionKey, message.text);
-        ws.send(encryptedData);
-        sendResponse({ success: true });
+        
+        // Create message object
+        const messageObject = {
+          type: 'chat',
+          messageId,
+          content: encryptedData
+        };
+
+        // Track message for delivery confirmation
+        pendingMessages.set(messageId, {
+          text: message.text,
+          timestamp: new Date().toISOString()
+        });
+
+        // Send message
+        ws.send(JSON.stringify(messageObject));
+        
+        // Notify popup that message is sent
+        sendResponse({ 
+          success: true, 
+          messageId,
+          status: 'sent'
+        });
+
+        // Set timeout for delivery confirmation
+        setTimeout(() => {
+          if (pendingMessages.has(messageId)) {
+            pendingMessages.delete(messageId);
+            chrome.runtime.sendMessage({
+              type: 'messageStatus',
+              messageId,
+              status: 'undelivered'
+            });
+          }
+        }, 5000);
+
       } catch (error) {
         console.error('Error sending message:', error);
-        sendResponse({ success: false, error: error.message });
+        sendResponse({ 
+          success: false, 
+          error: error.message 
+        });
       }
     })();
     return true; // Will respond asynchronously
