@@ -1,189 +1,153 @@
-// Generate a random encryption key for this session
-async function generateKey() {
-  return await crypto.subtle.generateKey(
-    {
-      name: "AES-GCM",
-      length: 256
-    },
-    true,
-    ["encrypt", "decrypt"]
-  );
-}
-
-// Encrypt message
-async function encryptMessage(key, message) {
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  const encodedMessage = new TextEncoder().encode(message);
-  
-  const encryptedData = await crypto.subtle.encrypt(
-    {
-      name: "AES-GCM",
-      iv: iv
-    },
-    key,
-    encodedMessage
-  );
-
-  // Combine IV and encrypted data
-  const combined = new Uint8Array(iv.length + encryptedData.byteLength);
-  combined.set(iv);
-  combined.set(new Uint8Array(encryptedData), iv.length);
-  
-  return combined;
-}
-
-// Decrypt message
-async function decryptMessage(key, encryptedCombined) {
-  const iv = encryptedCombined.slice(0, 12);
-  const encryptedData = encryptedCombined.slice(12);
-
-  const decryptedData = await crypto.subtle.decrypt(
-    {
-      name: "AES-GCM",
-      iv: iv
-    },
-    key,
-    encryptedData
-  );
-
-  return new TextDecoder().decode(decryptedData);
-}
-
-let ws;
-let encryptionKey;
+// Global variables
+let ws = null;
 let reconnectAttempts = 0;
-let pingInterval;
-let serverIp = null;
-const pendingMessages = new Map(); // Track messages waiting for delivery confirmation
+let pingInterval = null;
+let serverIp = 'localhost';
+let currentStatus = {
+  status: 'Connecting',
+  message: 'Initializing connection...',
+  serverIp: null
+};
 
-// Store the server IP in chrome.storage
+// Store message history (last 50 messages)
+const messageHistory = [];
+const MAX_HISTORY = 50;
+
+function addToHistory(message) {
+  messageHistory.push(message);
+  if (messageHistory.length > MAX_HISTORY) {
+    messageHistory.shift(); // Remove oldest message
+  }
+}
+
+// Store the server IP
 function saveServerIp(ip) {
-  chrome.storage.local.set({ serverIp: ip });
+  chrome.storage.local.set({ serverIp: ip }, () => {
+    console.log('Server IP saved:', ip);
+  });
 }
 
 // Get the stored server IP
 async function getServerIp() {
-  const result = await chrome.storage.local.get('serverIp');
-  return result.serverIp;
+  return new Promise((resolve) => {
+    chrome.storage.local.get('serverIp', (result) => {
+      resolve(result.serverIp || 'localhost');
+    });
+  });
 }
 
-// Generate unique message ID
-function generateMessageId() {
-  return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+// Update and broadcast status
+function updateStatus(status, message = '', serverIp = '') {
+  currentStatus = { 
+    type: 'connectionStatus',
+    status, 
+    message, 
+    serverIp 
+  };
+  
+  // Broadcast to all listeners
+  chrome.runtime.sendMessage(currentStatus).catch(err => {
+    console.log('No popup open to receive status');
+  });
 }
 
 // Connect to WebSocket server
 async function connect() {
+  console.log('Attempting to connect...');
+  
   if (ws && ws.readyState !== WebSocket.CLOSED) {
     console.log('Connection already exists');
     return;
   }
 
-  // Try to get stored server IP
-  const storedIp = await getServerIp();
-  if (!storedIp) {
-    chrome.runtime.sendMessage({ 
-      type: 'connectionStatus', 
-      status: 'error',
-      message: 'No server IP found. Please restart the server.'
-    });
+  // Try stored IP first
+  serverIp = await getServerIp();
+  console.log('Trying to connect to:', serverIp);
+
+  updateStatus('Connecting', `Trying ${serverIp}...`);
+
+  try {
+    const wsUrl = `ws://${serverIp}:8080`;
+    console.log('Creating WebSocket connection to:', wsUrl);
+    ws = new WebSocket(wsUrl);
+  } catch (err) {
+    console.error('Failed to create WebSocket:', err);
+    updateStatus('Error', 'Failed to connect');
     return;
   }
 
-  ws = new WebSocket(`ws://${storedIp}:8080`);
-  
-  ws.onopen = async () => {
-    // Reset reconnect attempts on successful connection
+  ws.onopen = () => {
+    console.log('WebSocket connected successfully');
     reconnectAttempts = 0;
-    
-    // Generate new encryption key when connection established
-    encryptionKey = await generateKey();
-    
+    updateStatus('Connected', '', serverIp);
+
     // Setup ping interval
     clearInterval(pingInterval);
     pingInterval = setInterval(() => {
-      if (ws.readyState === WebSocket.OPEN) {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        console.log('Sending ping...');
         ws.send(JSON.stringify({ type: 'ping' }));
       }
     }, 15000);
-
-    // Notify popup that connection is ready
-    chrome.runtime.sendMessage({ 
-      type: 'connectionStatus', 
-      status: 'connected',
-      serverIp: storedIp
-    });
   };
 
   ws.onmessage = async (event) => {
+    console.log('Received message:', event.data);
     try {
-      // First try to parse as JSON for control messages
       const data = JSON.parse(event.data);
-      
-      if (data.type === 'system' && data.message) {
-        // Extract IP from welcome message
-        const ipMatch = data.message.match(/at\s+(\d+\.\d+\.\d+\.\d+):/);
-        if (ipMatch) {
-          serverIp = ipMatch[1];
-          saveServerIp(serverIp);
-        }
-        return;
-      }
+      console.log('Parsed message:', data);
 
-      if (data.type === 'pong') {
-        console.log('Received pong from server');
-        return;
-      }
+      switch (data.type) {
+        case 'system':
+          console.log('Received system message:', data);
+          updateStatus(data.status || 'Connected', data.message, serverIp);
 
-      if (data.type === 'delivered') {
-        // Handle delivery confirmation
-        const pendingMsg = pendingMessages.get(data.messageId);
-        if (pendingMsg) {
-          pendingMessages.delete(data.messageId);
-          chrome.runtime.sendMessage({
-            type: 'messageDelivered',
-            messageId: data.messageId,
+          // Try to extract IP from welcome message
+          const ips = data.message.match(/Available at: ([^:]+)/);
+          if (ips) {
+            const addresses = ips[1].split(',').map(ip => ip.trim());
+            const nonLocalIp = addresses.find(ip => ip !== 'localhost' && ip !== '127.0.0.1');
+            if (nonLocalIp) {
+              console.log('Found non-local IP:', nonLocalIp);
+              serverIp = nonLocalIp;
+              saveServerIp(serverIp);
+              updateStatus('Connected', '', serverIp);
+            }
+          }
+          break;
+
+        case 'pong':
+          console.log('Received pong');
+          break;
+
+        case 'chat':
+          console.log('Received chat message:', data);
+          const message = {
+            type: 'messageReceived',
+            message: data.message,
+            from: data.from,
             timestamp: data.timestamp
+          };
+          addToHistory(message);
+          chrome.runtime.sendMessage(message).catch(err => {
+            console.log('No popup open to receive chat message');
           });
-        }
-        return;
-      }
+          break;
 
-      // If it's a chat message, decrypt and forward
-      if (data.type === 'chat') {
-        const encryptedData = new Uint8Array(await data.content.arrayBuffer());
-        const decryptedMessage = await decryptMessage(encryptionKey, encryptedData);
-        chrome.runtime.sendMessage({
-          type: 'messageReceived',
-          message: decryptedMessage,
-          from: data.from,
-          timestamp: data.timestamp
-        });
+        default:
+          console.log('Unknown message type:', data.type);
       }
-
     } catch (error) {
-      // If not JSON, treat as encrypted message
-      try {
-        const encryptedData = new Uint8Array(await event.data.arrayBuffer());
-        const decryptedMessage = await decryptMessage(encryptionKey, encryptedData);
-        chrome.runtime.sendMessage({
-          type: 'messageReceived',
-          message: decryptedMessage
-        });
-      } catch (error) {
-        console.error('Error processing received message:', error);
-      }
+      console.error('Error processing message:', error);
     }
   };
 
   ws.onclose = () => {
+    console.log('WebSocket closed');
     clearInterval(pingInterval);
-    chrome.runtime.sendMessage({ 
-      type: 'connectionStatus', 
-      status: 'disconnected' 
-    });
-    
-    // Try to reconnect after a delay with exponential backoff
+    updateStatus('Disconnected');
+
+    // Try to reconnect with exponential backoff
     const backoff = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000);
     reconnectAttempts++;
     console.log(`Attempting to reconnect in ${backoff}ms`);
@@ -192,68 +156,75 @@ async function connect() {
 
   ws.onerror = (error) => {
     console.error('WebSocket error:', error);
-    chrome.runtime.sendMessage({ 
-      type: 'connectionStatus', 
-      status: 'error',
-      message: error.message
-    });
+    updateStatus('Error', 'Connection error');
   };
 }
 
 // Handle messages from popup
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message.type === 'sendMessage' && ws && ws.readyState === WebSocket.OPEN) {
-    (async () => {
+  console.log('Received message from popup:', message);
+  
+  switch (message.type) {
+    case 'getStatus':
+      console.log('Sending current status:', currentStatus);
+      sendResponse(currentStatus);
+      break;
+
+    case 'getHistory':
+      console.log('Sending message history');
+      sendResponse({ messages: messageHistory });
+      break;
+
+    case 'sendMessage':
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        sendResponse({ success: false, error: 'Not connected' });
+        return true;
+      }
+
+      const text = message.text;
+      if (!text.trim()) {
+        sendResponse({ success: false, error: 'Empty message' });
+        return true;
+      }
+
       try {
-        const messageId = generateMessageId();
-        const encryptedData = await encryptMessage(encryptionKey, message.text);
-        
-        // Create message object
-        const messageObject = {
+        const chatMessage = {
           type: 'chat',
-          messageId,
-          content: encryptedData
-        };
-
-        // Track message for delivery confirmation
-        pendingMessages.set(messageId, {
-          text: message.text,
+          message: text,
           timestamp: new Date().toISOString()
-        });
+        };
+        ws.send(JSON.stringify(chatMessage));
 
-        // Send message
-        ws.send(JSON.stringify(messageObject));
-        
-        // Notify popup that message is sent
-        sendResponse({ 
-          success: true, 
-          messageId,
-          status: 'sent'
-        });
+        // Add self message to history
+        const selfMessage = {
+          type: 'messageReceived',
+          message: text,
+          from: 'self',
+          timestamp: chatMessage.timestamp
+        };
+        addToHistory(selfMessage);
 
-        // Set timeout for delivery confirmation
-        setTimeout(() => {
-          if (pendingMessages.has(messageId)) {
-            pendingMessages.delete(messageId);
-            chrome.runtime.sendMessage({
-              type: 'messageStatus',
-              messageId,
-              status: 'undelivered'
-            });
-          }
-        }, 5000);
-
+        sendResponse({ success: true });
       } catch (error) {
         console.error('Error sending message:', error);
-        sendResponse({ 
-          success: false, 
-          error: error.message 
-        });
+        sendResponse({ success: false, error: error.message });
       }
-    })();
-    return true; // Will respond asynchronously
+      break;
   }
+  return true; // Keep channel open for sendResponse
 });
 
-// Start connection when background script loads
+// Handle service worker lifecycle
+chrome.runtime.onStartup.addListener(() => {
+  console.log('Extension starting up');
+  connect();
+});
+
+chrome.runtime.onInstalled.addListener(() => {
+  console.log('Extension installed/updated');
+  connect();
+});
+
+// Start connection immediately
+console.log('Background script loaded');
 connect();

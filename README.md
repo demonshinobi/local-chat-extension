@@ -4,74 +4,74 @@ A Chrome extension for encrypted chat communication over local network using Web
 
 ## Features
 
-- End-to-end encryption using AES-GCM
-- Local network communication via WebSocket
-- Real-time message updates
-- Simple and clean interface
-- Automatic reconnection
+- Real-time chat between Chrome browsers on the same local network
+- End-to-end encryption using AES-256-GCM
+- Message history (stores last 50 messages in memory)
+- Automatic server discovery on local network
+- Clean and simple user interface
 
 ## Installation
 
-### 1. Clone the Repository
+1. Clone this repository:
 ```bash
 git clone https://github.com/demonshinobi/local-chat-extension.git
-```
-
-### 2. Start the WebSocket Server
-From the root directory of the project, run:
-```bash
 cd local-chat-extension
-npm install
-npm run start-server
 ```
 
-You should see a message saying "WebSocket server running on port 8080"
+2. Install server dependencies:
+```bash
+cd server
+npm install
+cd ..
+```
 
-### 3. Load the Extension in Chrome
-1. Open Chrome and go to `chrome://extensions/`
-2. Enable "Developer mode" in the top right
-3. Click "Load unpacked" and select the `local-chat-extension` directory
+3. Load the extension in Chrome:
+   - Open Chrome and go to `chrome://extensions/`
+   - Enable "Developer mode" in the top right
+   - Click "Load unpacked" and select the `local-chat-extension` folder
 
-## Using the Extension
+4. Run the server:
+   - Double-click `setup.bat` to install and start the server
+   - The server will run in the background and start automatically when you log in
 
-1. Make sure the WebSocket server is running (you'll see "WebSocket server running on port 8080" in the terminal)
-2. Click the extension icon in Chrome to open the chat popup
-3. Wait for "Connected" status to appear
-4. Start chatting with other users on the same local network
+## Usage
 
-## Security
-
-- Messages are encrypted using AES-GCM with a 256-bit key
-- Each chat session generates a new encryption key
-- Messages are encrypted/decrypted locally in the browser
-- The WebSocket server only relays encrypted messages without decrypting them
+1. Click the extension icon in Chrome to open the chat popup
+2. The extension will automatically connect to any local chat server
+3. Type your message and press Enter or click Send
+4. Messages are encrypted and only visible to users on your local network
+5. Message history is preserved while the extension is running
 
 ## Technical Details
 
-- Uses the Web Crypto API for encryption
-- WebSocket server runs on port 8080
-- Communication is limited to localhost for security
-- Chrome v88+ required for Web Crypto API support
+- Server: Node.js with WebSocket (ws) library
+- Encryption: AES-256-GCM with random IV for each message
+- Extension: Chrome Manifest V3
+- Network: Automatic local IP discovery and connection
 
-## Limitations
+## Security
 
-- All users must be on the same local network
-- No persistent message history
-- New encryption key generated on each connection
+- All messages are encrypted using AES-256-GCM
+- Each message uses a unique initialization vector (IV)
+- Messages are only stored in memory, not persisted to disk
+- Communication is limited to local network only
 
-## Troubleshooting
+## Development
 
-If you see any npm-related errors, make sure you're running the commands from the root directory of the project (the folder containing this README.md file).
+To modify the extension:
 
-The structure should look like this:
-```
-local-chat-extension/
-├── README.md
-├── package.json
-├── manifest.json
-├── popup.html
-├── popup.js
-├── background.js
-└── server/
-    ├── package.json
-    └── server.js
+1. Make your changes to the source files
+2. Reload the extension in Chrome
+3. For server changes, restart `setup.bat`
+
+## Files
+
+- `popup.html/js`: Extension popup UI and logic
+- `background.js`: Extension background service worker
+- `server/server.js`: WebSocket server implementation
+- `manifest.json`: Extension configuration
+- `setup.bat`: Server installation and startup script
+
+## License
+
+MIT License - feel free to modify and use as needed!

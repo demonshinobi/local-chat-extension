@@ -7,15 +7,13 @@
     "storage"
   ],
   "host_permissions": [
-    "http://localhost/*",
-    "http://*/",
-    "ws://*/"
+    "*://*/*"
   ],
-  "action": {
-    "default_popup": "popup.html"
-  },
   "background": {
-    "service_worker": "background.js",
-    "type": "module"
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Local Network Chat"
   }
 }

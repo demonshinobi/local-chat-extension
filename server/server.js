@@ -1,133 +1,165 @@
 const WebSocket = require('ws');
 const os = require('os');
+const crypto = require('crypto');
 
-// Get local IP address
-function getLocalIpAddress() {
+// Get local IP addresses
+function getLocalIpAddresses() {
   const interfaces = os.networkInterfaces();
+  const addresses = [];
+  
   for (const name of Object.keys(interfaces)) {
     for (const iface of interfaces[name]) {
       // Skip internal and non-IPv4 addresses
       if (!iface.internal && iface.family === 'IPv4') {
-        return iface.address;
+        addresses.push(iface.address);
       }
     }
   }
-  return 'localhost';
+  
+  return addresses;
+}
+
+// Simple encryption/decryption
+function encrypt(text) {
+  const key = crypto.scryptSync('local-chat-password', 'salt', 32);
+  const iv = crypto.randomBytes(16);
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  let encrypted = cipher.update(text, 'utf8', 'hex');
+  encrypted += cipher.final('hex');
+  const authTag = cipher.getAuthTag();
+  return {
+    iv: iv.toString('hex'),
+    encrypted: encrypted,
+    authTag: authTag.toString('hex')
+  };
+}
+
+function decrypt(encryptedData) {
+  const key = crypto.scryptSync('local-chat-password', 'salt', 32);
+  const decipher = crypto.createDecipheriv(
+    'aes-256-gcm',
+    key,
+    Buffer.from(encryptedData.iv, 'hex')
+  );
+  decipher.setAuthTag(Buffer.from(encryptedData.authTag, 'hex'));
+  let decrypted = decipher.update(encryptedData.encrypted, 'hex', 'utf8');
+  decrypted += decipher.final('utf8');
+  return decrypted;
 }
 
 const port = 8080;
-const localIp = getLocalIpAddress();
+const addresses = getLocalIpAddresses();
+console.log(`Available IP addresses: ${addresses.join(', ')}`);
 
-const wss = new WebSocket.Server({
+const wss = new WebSocket.Server({ 
   port,
-  clientTracking: true,
-  perMessageDeflate: {
-    zlibDeflateOptions: { chunkSize: 1024, memLevel: 7, level: 3 },
-    zlibInflateOptions: { chunkSize: 10 * 1024 },
-    clientNoContextTakeover: true,
-    serverNoContextTakeover: true,
-    serverMaxWindowBits: 10,
-    concurrencyLimit: 10,
-    threshold: 1024
-  }
+  host: '0.0.0.0' // Listen on all interfaces
 });
 
-console.log(`WebSocket server running on ${localIp}:${port}`);
+console.log(`WebSocket server created on port ${port}`);
 
 // Store connected clients
 const clients = new Set();
 
-// Broadcast message to all clients except sender
-function broadcast(ws, message) {
-  clients.forEach((client) => {
-    if (client !== ws && client.readyState === WebSocket.OPEN) {
-      client.send(message);
-    }
-  });
-}
-
 wss.on('connection', (ws, req) => {
-  clients.add(ws);
   const clientIp = req.socket.remoteAddress;
-  console.log(`Client connected from ${clientIp}`);
+  console.log(`New client connected from ${clientIp}`);
+  clients.add(ws);
 
-  // Send welcome message
-  ws.send(JSON.stringify({
+  // Send welcome message immediately
+  const welcomeMessage = {
     type: 'system',
-    message: `Connected to chat server at ${localIp}:${port}`
-  }));
-
-  let pingInterval;
-  let missedPings = 0;
-  const MAX_MISSED_PINGS = 3;
-
-  // Set up ping interval
-  const setupPingInterval = () => {
-    clearInterval(pingInterval);
-    missedPings = 0;
-    pingInterval = setInterval(() => {
-      if (ws.readyState === WebSocket.OPEN) {
-        if (missedPings >= MAX_MISSED_PINGS) {
-          console.log('Client unresponsive, closing connection');
-          ws.terminate();
-          return;
-        }
-        ws.ping();
-        missedPings++;
-      }
-    }, 15000); // 15 seconds
+    status: 'Connected',
+    message: `Connected to chat server. Available at: ${addresses.join(', ')}:${port}`
   };
+  
+  try {
+    ws.send(JSON.stringify(welcomeMessage));
+  } catch (error) {
+    console.error('Error sending welcome message:', error);
+  }
 
-  setupPingInterval();
-
+  // Handle incoming messages
   ws.on('message', (message) => {
     try {
-      // Try to parse as JSON
-      const data = JSON.parse(message.toString());
+      const data = JSON.parse(message);
       
       if (data.type === 'ping') {
         ws.send(JSON.stringify({ type: 'pong' }));
         return;
       }
 
-      if (data.type === 'chat') {
-        // Add sender info and timestamp
-        const enhancedMessage = JSON.stringify({
-          ...data,
+      if (data.type === 'chat' && data.message) {
+        // Encrypt the message
+        const encryptedData = encrypt(data.message);
+        
+        // Broadcast to all other clients
+        const broadcastMessage = JSON.stringify({
+          type: 'chat',
+          message: data.message,
+          from: clientIp,
           timestamp: new Date().toISOString(),
-          from: clientIp
+          encrypted: encryptedData
         });
-        
-        // Broadcast to others
-        broadcast(ws, enhancedMessage);
-        
-        // Send delivery confirmation
-        ws.send(JSON.stringify({
-          type: 'delivered',
-          messageId: data.messageId,
-          timestamp: new Date().toISOString()
-        }));
+
+        // Only send to other clients
+        clients.forEach((client) => {
+          if (client !== ws && client.readyState === WebSocket.OPEN) {
+            try {
+              client.send(broadcastMessage);
+            } catch (error) {
+              console.error('Error broadcasting message:', error);
+            }
+          }
+        });
       }
-    } catch (e) {
-      // Not JSON, treat as encrypted message
-      broadcast(ws, message);
+    } catch (error) {
+      console.error('Error processing message:', error);
+      try {
+        ws.send(JSON.stringify({
+          type: 'error',
+          message: 'Failed to process message'
+        }));
+      } catch (e) {
+        console.error('Error sending error message:', e);
+      }
     }
   });
 
-  ws.on('pong', () => {
-    missedPings = 0;
-    console.log(`Client ${clientIp} active`);
-  });
-
-  ws.on('error', (error) => {
-    console.error('WebSocket error:', error);
-    clients.delete(ws);
-    clearInterval(pingInterval);
-  });
-
+  // Handle client disconnect
   ws.on('close', () => {
-    clients.delete(ws);
-    clearInterval(pingInterval);
     console.log(`Client ${clientIp} disconnected`);
+    clients.delete(ws);
+  });
+
+  // Handle errors
+  ws.on('error', (error) => {
+    console.error(`WebSocket error for ${clientIp}:`, error);
+    clients.delete(ws);
   });
 });
+
+// Keep track of server status
+let isShuttingDown = false;
+
+process.on('SIGINT', () => {
+  console.log('Shutting down server...');
+  isShuttingDown = true;
+  
+  // Close all client connections
+  wss.clients.forEach((client) => {
+    try {
+      client.close();
+    } catch (error) {
+      console.error('Error closing client connection:', error);
+    }
+  });
+  
+  // Close the server
+  wss.close(() => {
+    console.log('Server shutdown complete');
+    process.exit(0);
+  });
+});
+
+console.log('Server setup complete');
