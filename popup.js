@@ -4,6 +4,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const messagesEl = document.getElementById('messages');
   const inputEl = document.getElementById('message-input');
   const sendButton = document.getElementById('send-button');
+  const serverIpInput = document.getElementById('server-ip');
+  const connectButton = document.getElementById('connect-button');
 
   let connected = false;
 
@@ -18,6 +20,7 @@ document.addEventListener('DOMContentLoaded', () => {
         statusEl.textContent = serverIp ? `Connected to ${serverIp}` : 'Connected';
         inputEl.disabled = false;
         sendButton.disabled = false;
+        serverIpInput.value = serverIp;
         break;
         
       case 'Connecting':
@@ -80,6 +83,26 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  // Connect to server
+  async function connectToServer() {
+    const ip = serverIpInput.value.trim();
+    if (!ip) {
+      updateStatus('Error', 'Please enter a server IP');
+      return;
+    }
+
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: 'connectTo',
+        ip: ip
+      });
+      console.log('Connect response:', response);
+    } catch (error) {
+      console.error('Error connecting:', error);
+      updateStatus('Error', 'Failed to connect: ' + error.message);
+    }
+  }
+
   // Send a message
   async function sendMessage() {
     const text = inputEl.value.trim();
@@ -108,6 +131,13 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // Set up event listeners
+  connectButton.addEventListener('click', connectToServer);
+  serverIpInput.addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') {
+      connectToServer();
+    }
+  });
+
   sendButton.addEventListener('click', sendMessage);
   inputEl.addEventListener('keypress', (e) => {
     if (e.key === 'Enter') {

@@ -3,22 +3,6 @@ let ws = null;
 let reconnectAttempts = 0;
 let pingInterval = null;
 let serverIp = 'localhost';
-let currentStatus = {
-  status: 'Connecting',
-  message: 'Initializing connection...',
-  serverIp: null
-};
-
-// Store message history (last 50 messages)
-const messageHistory = [];
-const MAX_HISTORY = 50;
-
-function addToHistory(message) {
-  messageHistory.push(message);
-  if (messageHistory.length > MAX_HISTORY) {
-    messageHistory.shift(); // Remove oldest message
-  }
-}
 
 // Store the server IP
 function saveServerIp(ip) {
@@ -52,16 +36,14 @@ function updateStatus(status, message = '', serverIp = '') {
 }
 
 // Connect to WebSocket server
-async function connect() {
-  console.log('Attempting to connect...');
-  
+async function connect(targetIp = null) {
   if (ws && ws.readyState !== WebSocket.CLOSED) {
     console.log('Connection already exists');
     return;
   }
 
-  // Try stored IP first
-  serverIp = await getServerIp();
+  // Use provided IP or get stored IP
+  serverIp = targetIp || await getServerIp();
   console.log('Trying to connect to:', serverIp);
 
   updateStatus('Connecting', `Trying ${serverIp}...`);
@@ -101,19 +83,6 @@ async function connect() {
         case 'system':
           console.log('Received system message:', data);
           updateStatus(data.status || 'Connected', data.message, serverIp);
-
-          // Try to extract IP from welcome message
-          const ips = data.message.match(/Available at: ([^:]+)/);
-          if (ips) {
-            const addresses = ips[1].split(',').map(ip => ip.trim());
-            const nonLocalIp = addresses.find(ip => ip !== 'localhost' && ip !== '127.0.0.1');
-            if (nonLocalIp) {
-              console.log('Found non-local IP:', nonLocalIp);
-              serverIp = nonLocalIp;
-              saveServerIp(serverIp);
-              updateStatus('Connected', '', serverIp);
-            }
-          }
           break;
 
         case 'pong':
@@ -128,7 +97,6 @@ async function connect() {
             from: data.from,
             timestamp: data.timestamp
           };
-          addToHistory(message);
           chrome.runtime.sendMessage(message).catch(err => {
             console.log('No popup open to receive chat message');
           });
@@ -151,7 +119,7 @@ async function connect() {
     const backoff = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000);
     reconnectAttempts++;
     console.log(`Attempting to reconnect in ${backoff}ms`);
-    setTimeout(connect, backoff);
+    setTimeout(() => connect(), backoff);
   };
 
   ws.onerror = (error) => {
@@ -170,9 +138,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sendResponse(currentStatus);
       break;
 
-    case 'getHistory':
-      console.log('Sending message history');
-      sendResponse({ messages: messageHistory });
+    case 'connectTo':
+      if (message.ip) {
+        saveServerIp(message.ip);
+        if (ws) {
+          ws.close();
+        }
+        connect(message.ip);
+        sendResponse({ success: true });
+      }
       break;
 
     case 'sendMessage':
@@ -194,16 +168,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           timestamp: new Date().toISOString()
         };
         ws.send(JSON.stringify(chatMessage));
-
-        // Add self message to history
-        const selfMessage = {
-          type: 'messageReceived',
-          message: text,
-          from: 'self',
-          timestamp: chatMessage.timestamp
-        };
-        addToHistory(selfMessage);
-
         sendResponse({ success: true });
       } catch (error) {
         console.error('Error sending message:', error);

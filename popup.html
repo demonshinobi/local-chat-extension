@@ -20,6 +20,31 @@
       text-align: center;
       transition: color 0.3s;
     }
+    #server-controls {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 10px;
+      padding: 8px;
+      background: #f8f9fa;
+      border-radius: 4px;
+    }
+    #server-ip {
+      flex-grow: 1;
+      padding: 8px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+    }
+    #connect-button {
+      padding: 8px 16px;
+      background: #28a745;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    #connect-button:hover {
+      background: #218838;
+    }
     #messages {
       height: 300px;
       overflow-y: auto;
@@ -99,6 +124,10 @@
 </head>
 <body>
   <div id="connection-status">Connecting...</div>
+  <div id="server-controls">
+    <input type="text" id="server-ip" placeholder="Enter server IP...">
+    <button id="connect-button">Connect</button>
+  </div>
   <div id="messages"></div>
   <div class="input-area">
     <input type="text" id="message-input" placeholder="Type a message..." disabled>
