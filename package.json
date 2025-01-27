@@ -1,0 +1,10 @@
+{
+  "name": "local-chat-extension",
+  "version": "1.0.0",
+  "description": "Chrome extension for encrypted local network chat",
+  "scripts": {
+    "start-server": "cd server && npm install && npm start"
+  },
+  "author": "",
+  "license": "MIT"
+}
