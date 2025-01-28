@@ -8,6 +8,13 @@ document.addEventListener('DOMContentLoaded', () => {
   const connectButton = document.getElementById('connect-button');
 
   let connected = false;
+  let unreadMessages = new Set();
+
+  // Format timestamp
+  function formatTimestamp(isoString) {
+    const date = new Date(isoString);
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
 
   // Update UI with connection status
   function updateStatus(status, message = '', serverIp = '') {
@@ -58,28 +65,75 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // Add a message to the chat
-  function addMessage(text, fromSelf = false, from = null) {
+  function addMessage(message, fromSelf = false, from = null, timestamp = null, read = true) {
     const div = document.createElement('div');
     div.classList.add('message');
+    
     if (fromSelf) {
       div.classList.add('self');
-      text = `You: ${text}`;
-    } else if (from) {
-      text = `${from}: ${text}`;
     }
-    div.textContent = text;
+
+    if (!read) {
+      div.classList.add('unread');
+      unreadMessages.add(timestamp);
+    }
+
+    const messageText = document.createElement('div');
+    messageText.classList.add('message-text');
+    if (fromSelf) {
+      messageText.textContent = `You: ${message}`;
+    } else if (from) {
+      messageText.textContent = `${from}: ${message}`;
+    } else {
+      messageText.textContent = message;
+    }
+    div.appendChild(messageText);
+
+    if (timestamp) {
+      const timeDiv = document.createElement('div');
+      timeDiv.classList.add('timestamp');
+      timeDiv.textContent = formatTimestamp(timestamp);
+      div.appendChild(timeDiv);
+    }
+
     messagesEl.appendChild(div);
     messagesEl.scrollTop = messagesEl.scrollHeight;
+
+    // Mark as read if message is visible
+    if (!read && isElementVisible(div)) {
+      markMessageAsRead(timestamp);
+    }
+  }
+
+  // Check if element is visible in scroll container
+  function isElementVisible(el) {
+    const rect = el.getBoundingClientRect();
+    const containerRect = messagesEl.getBoundingClientRect();
+    return rect.top >= containerRect.top && rect.bottom <= containerRect.bottom;
+  }
+
+  // Mark message as read
+  function markMessageAsRead(timestamp) {
+    if (unreadMessages.has(timestamp)) {
+      unreadMessages.delete(timestamp);
+      chrome.runtime.sendMessage({
+        type: 'markAsRead',
+        messageIds: [timestamp]
+      });
+    }
   }
 
   // Load message history
   function loadHistory(messages) {
+    messagesEl.innerHTML = ''; // Clear existing messages
     messages.forEach(msg => {
-      if (msg.from === 'self') {
-        addMessage(msg.message, true);
-      } else {
-        addMessage(msg.message, false, msg.from);
-      }
+      addMessage(
+        msg.message,
+        msg.from === 'self',
+        msg.from !== 'self' ? msg.from : null,
+        msg.timestamp,
+        msg.read
+      );
     });
   }
 
@@ -130,6 +184,19 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
+  // Set up scroll handler to mark messages as read
+  messagesEl.addEventListener('scroll', () => {
+    const unreadElements = messagesEl.querySelectorAll('.message.unread');
+    unreadElements.forEach(el => {
+      if (isElementVisible(el)) {
+        const timestamp = el.querySelector('.timestamp')?.dataset.timestamp;
+        if (timestamp) {
+          markMessageAsRead(timestamp);
+        }
+      }
+    });
+  });
+
   // Set up event listeners
   connectButton.addEventListener('click', connectToServer);
   serverIpInput.addEventListener('keypress', (e) => {
@@ -152,11 +219,13 @@ document.addEventListener('DOMContentLoaded', () => {
     if (message.type === 'connectionStatus') {
       updateStatus(message.status, message.message, message.serverIp);
     } else if (message.type === 'messageReceived') {
-      if (message.from === 'self') {
-        addMessage(message.message, true);
-      } else {
-        addMessage(message.message, false, message.from);
-      }
+      addMessage(
+        message.message,
+        message.from === 'self',
+        message.from !== 'self' ? message.from : null,
+        message.timestamp,
+        message.read
+      );
     } else {
       console.log('Unknown message type:', message.type);
     }
