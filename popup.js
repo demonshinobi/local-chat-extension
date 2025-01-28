@@ -6,9 +6,48 @@ document.addEventListener('DOMContentLoaded', () => {
   const sendButton = document.getElementById('send-button');
   const serverIpInput = document.getElementById('server-ip');
   const connectButton = document.getElementById('connect-button');
+  const settingsToggle = document.getElementById('settings-toggle');
+  const settingsPanel = document.getElementById('settings-panel');
+  const notificationToggle = document.getElementById('notification-toggle');
+  const clearHistoryButton = document.getElementById('clear-history');
 
   let connected = false;
   let unreadMessages = new Set();
+
+  // Load settings
+  chrome.storage.local.get(['notificationsEnabled'], (result) => {
+    notificationToggle.checked = result.notificationsEnabled || false;
+  });
+
+  // Settings toggle
+  settingsToggle.addEventListener('click', () => {
+    settingsPanel.classList.toggle('visible');
+  });
+
+  // Notification toggle
+  notificationToggle.addEventListener('change', () => {
+    const enabled = notificationToggle.checked;
+    chrome.storage.local.set({ notificationsEnabled: enabled });
+
+    if (enabled) {
+      // Request notification permission if needed
+      Notification.requestPermission().then(permission => {
+        if (permission !== 'granted') {
+          notificationToggle.checked = false;
+          chrome.storage.local.set({ notificationsEnabled: false });
+        }
+      });
+    }
+  });
+
+  // Clear history
+  clearHistoryButton.addEventListener('click', () => {
+    if (confirm('Are you sure you want to clear all chat history?')) {
+      chrome.runtime.sendMessage({ type: 'clearHistory' }, () => {
+        messagesEl.innerHTML = '';
+      });
+    }
+  });
 
   // Format timestamp
   function formatTimestamp(isoString) {
@@ -22,7 +61,7 @@ document.addEventListener('DOMContentLoaded', () => {
     
     switch(status) {
       case 'Connected':
-        statusEl.style.color = 'green';
+        statusEl.style.color = 'var(--success-color)';
         connected = true;
         statusEl.textContent = serverIp ? `Connected to ${serverIp}` : 'Connected';
         inputEl.disabled = false;
@@ -31,7 +70,7 @@ document.addEventListener('DOMContentLoaded', () => {
         break;
         
       case 'Connecting':
-        statusEl.style.color = 'orange';
+        statusEl.style.color = 'var(--primary-color)';
         connected = false;
         statusEl.textContent = message || 'Connecting...';
         inputEl.disabled = true;
@@ -39,7 +78,7 @@ document.addEventListener('DOMContentLoaded', () => {
         break;
         
       case 'Disconnected':
-        statusEl.style.color = 'red';
+        statusEl.style.color = 'var(--danger-color)';
         connected = false;
         statusEl.textContent = 'Disconnected';
         inputEl.disabled = true;
@@ -47,7 +86,7 @@ document.addEventListener('DOMContentLoaded', () => {
         break;
         
       case 'Error':
-        statusEl.style.color = 'red';
+        statusEl.style.color = 'var(--danger-color)';
         connected = false;
         statusEl.textContent = message || 'Connection error';
         inputEl.disabled = true;
@@ -55,13 +94,30 @@ document.addEventListener('DOMContentLoaded', () => {
         break;
         
       default:
-        statusEl.style.color = 'red';
+        statusEl.style.color = 'var(--danger-color)';
         connected = false;
         statusEl.textContent = message || status;
         inputEl.disabled = true;
         sendButton.disabled = true;
         break;
     }
+  }
+
+  // Show notification
+  function showNotification(message, from) {
+    chrome.storage.local.get(['notificationsEnabled'], (result) => {
+      if (result.notificationsEnabled && document.hidden) {
+        const notification = new Notification('Local Chat Pro', {
+          body: `${from}: ${message}`,
+          icon: 'icons/icon128.png'
+        });
+
+        notification.onclick = () => {
+          window.focus();
+          notification.close();
+        };
+      }
+    });
   }
 
   // Add a message to the chat
@@ -84,6 +140,7 @@ document.addEventListener('DOMContentLoaded', () => {
       messageText.textContent = `You: ${message}`;
     } else if (from) {
       messageText.textContent = `${from}: ${message}`;
+      showNotification(message, from);
     } else {
       messageText.textContent = message;
     }
@@ -93,6 +150,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const timeDiv = document.createElement('div');
       timeDiv.classList.add('timestamp');
       timeDiv.textContent = formatTimestamp(timestamp);
+      timeDiv.dataset.timestamp = timestamp;
       div.appendChild(timeDiv);
     }
 
@@ -192,6 +250,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const timestamp = el.querySelector('.timestamp')?.dataset.timestamp;
         if (timestamp) {
           markMessageAsRead(timestamp);
+          el.classList.remove('unread');
         }
       }
     });
@@ -209,6 +268,23 @@ document.addEventListener('DOMContentLoaded', () => {
   inputEl.addEventListener('keypress', (e) => {
     if (e.key === 'Enter') {
       sendMessage();
+    }
+  });
+
+  // Listen for visibility change
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) {
+      // Mark all visible messages as read when popup becomes visible
+      const unreadElements = messagesEl.querySelectorAll('.message.unread');
+      unreadElements.forEach(el => {
+        if (isElementVisible(el)) {
+          const timestamp = el.querySelector('.timestamp')?.dataset.timestamp;
+          if (timestamp) {
+            markMessageAsRead(timestamp);
+            el.classList.remove('unread');
+          }
+        }
+      });
     }
   });
 

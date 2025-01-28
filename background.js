@@ -5,16 +5,35 @@ let pingInterval = null;
 let serverIp = 'localhost';
 let messageHistory = [];
 const MAX_HISTORY = 100; // Store up to 100 messages
+let currentStatus = { type: 'connectionStatus', status: 'Disconnected' };
+let isConnecting = false;
 
-// Store message in history
+// Store message in history (avoid duplicates)
 function addMessageToHistory(message) {
-  messageHistory.push(message);
-  if (messageHistory.length > MAX_HISTORY) {
-    messageHistory.shift(); // Remove oldest message
+  // Check for duplicates based on timestamp and content
+  const isDuplicate = messageHistory.some(m => 
+    m.timestamp === message.timestamp && 
+    m.message === message.message && 
+    m.from === message.from
+  );
+
+  if (!isDuplicate) {
+    messageHistory.push(message);
+    if (messageHistory.length > MAX_HISTORY) {
+      messageHistory.shift(); // Remove oldest message
+    }
+    // Save to Chrome storage
+    chrome.storage.local.set({ messageHistory: messageHistory }, () => {
+      console.log('Message history saved');
+    });
   }
-  // Save to Chrome storage
-  chrome.storage.local.set({ messageHistory: messageHistory }, () => {
-    console.log('Message history saved');
+}
+
+// Clear message history
+function clearMessageHistory() {
+  messageHistory = [];
+  chrome.storage.local.remove('messageHistory', () => {
+    console.log('Message history cleared');
   });
 }
 
@@ -51,98 +70,108 @@ function updateStatus(status, message = '', serverIp = '') {
 
 // Connect to WebSocket server
 async function connect(targetIp = null) {
+  if (isConnecting) {
+    console.log('Connection attempt already in progress');
+    return;
+  }
+
   if (ws && ws.readyState !== WebSocket.CLOSED) {
     console.log('Connection already exists');
     return;
   }
 
-  // Use provided IP or get stored IP
-  serverIp = targetIp || await getServerIp();
-  console.log('Trying to connect to:', serverIp);
-
-  updateStatus('Connecting', `Trying ${serverIp}...`);
+  isConnecting = true;
 
   try {
+    // Use provided IP or get stored IP
+    serverIp = targetIp || await getServerIp();
+    console.log('Trying to connect to:', serverIp);
+
+    updateStatus('Connecting', `Trying ${serverIp}...`);
+
     const wsUrl = `ws://${serverIp}:8080`;
     console.log('Creating WebSocket connection to:', wsUrl);
     ws = new WebSocket(wsUrl);
-  } catch (err) {
-    console.error('Failed to create WebSocket:', err);
+
+    ws.onopen = () => {
+      console.log('WebSocket connected successfully');
+      reconnectAttempts = 0;
+      updateStatus('Connected', '', serverIp);
+
+      // Setup ping interval
+      clearInterval(pingInterval);
+      pingInterval = setInterval(() => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          console.log('Sending ping...');
+          ws.send(JSON.stringify({ type: 'ping' }));
+        }
+      }, 15000);
+    };
+
+    ws.onmessage = async (event) => {
+      console.log('Received message:', event.data);
+      try {
+        const data = JSON.parse(event.data);
+        console.log('Parsed message:', data);
+
+        switch (data.type) {
+          case 'system':
+            console.log('Received system message:', data);
+            updateStatus(data.status || 'Connected', data.message, serverIp);
+            break;
+
+          case 'pong':
+            console.log('Received pong');
+            break;
+
+          case 'chat':
+            console.log('Received chat message:', data);
+            // Add received message to history
+            const receivedMessage = {
+              type: 'messageReceived',
+              message: data.message,
+              from: data.from,
+              timestamp: data.timestamp,
+              read: false
+            };
+            addMessageToHistory(receivedMessage);
+            chrome.runtime.sendMessage(receivedMessage).catch(err => {
+              console.log('No popup open to receive chat message');
+            });
+            break;
+
+          default:
+            console.log('Unknown message type:', data.type);
+        }
+      } catch (error) {
+        console.error('Error processing message:', error);
+      }
+    };
+
+    ws.onclose = () => {
+      console.log('WebSocket closed');
+      clearInterval(pingInterval);
+      updateStatus('Disconnected');
+      isConnecting = false;
+
+      // Try to reconnect with exponential backoff
+      const backoff = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000);
+      reconnectAttempts++;
+      console.log(`Attempting to reconnect in ${backoff}ms`);
+      setTimeout(() => connect(), backoff);
+    };
+
+    ws.onerror = (error) => {
+      console.error('WebSocket error:', error);
+      updateStatus('Error', 'Connection error');
+      isConnecting = false;
+    };
+
+  } catch (error) {
+    console.error('Failed to create WebSocket:', error);
     updateStatus('Error', 'Failed to connect');
-    return;
+    isConnecting = false;
   }
-
-  ws.onopen = () => {
-    console.log('WebSocket connected successfully');
-    reconnectAttempts = 0;
-    updateStatus('Connected', '', serverIp);
-
-    // Setup ping interval
-    clearInterval(pingInterval);
-    pingInterval = setInterval(() => {
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        console.log('Sending ping...');
-        ws.send(JSON.stringify({ type: 'ping' }));
-      }
-    }, 15000);
-  };
-
-  ws.onmessage = async (event) => {
-    console.log('Received message:', event.data);
-    try {
-      const data = JSON.parse(event.data);
-      console.log('Parsed message:', data);
-
-      switch (data.type) {
-        case 'system':
-          console.log('Received system message:', data);
-          updateStatus(data.status || 'Connected', data.message, serverIp);
-          break;
-
-        case 'pong':
-          console.log('Received pong');
-          break;
-
-        case 'chat':
-          console.log('Received chat message:', data);
-          // Add received message to history
-          const receivedMessage = {
-            type: 'messageReceived',
-            message: data.message,
-            from: data.from,
-            timestamp: data.timestamp,
-            read: false
-          };
-          addMessageToHistory(receivedMessage);
-          chrome.runtime.sendMessage(receivedMessage).catch(err => {
-            console.log('No popup open to receive chat message');
-          });
-          break;
-
-        default:
-          console.log('Unknown message type:', data.type);
-      }
-    } catch (error) {
-      console.error('Error processing message:', error);
-    }
-  };
-
-  ws.onclose = () => {
-    console.log('WebSocket closed');
-    clearInterval(pingInterval);
-    updateStatus('Disconnected');
-
-    // Try to reconnect with exponential backoff
-    const backoff = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000);
-    reconnectAttempts++;
-    console.log(`Attempting to reconnect in ${backoff}ms`);
-    setTimeout(() => connect(), backoff);
-  };
-
-  ws.onerror = (error) => {
-    console.error('WebSocket error:', error);
-    updateStatus('Error', 'Connection error');
-  };
 }
 
 // Load message history on startup
@@ -166,6 +195,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     case 'getHistory':
       console.log('Sending message history');
       sendResponse({ messages: messageHistory });
+      break;
+
+    case 'clearHistory':
+      console.log('Clearing message history');
+      clearMessageHistory();
+      sendResponse({ success: true });
       break;
 
     case 'markAsRead':
@@ -232,17 +267,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   return true; // Keep channel open for sendResponse
 });
 
+// Handle initialization
+let initialized = false;
+function initialize() {
+  if (!initialized) {
+    initialized = true;
+    console.log('Extension initializing...');
+    connect();
+  }
+}
+
 // Handle service worker lifecycle
-chrome.runtime.onStartup.addListener(() => {
-  console.log('Extension starting up');
-  connect();
-});
+chrome.runtime.onStartup.addListener(initialize);
+chrome.runtime.onInstalled.addListener(initialize);
 
-chrome.runtime.onInstalled.addListener(() => {
-  console.log('Extension installed/updated');
-  connect();
-});
-
-// Start connection immediately
-console.log('Background script loaded');
-connect();
+// Start connection if not already initialized
+initialize();
