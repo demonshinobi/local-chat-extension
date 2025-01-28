@@ -1,17 +1,22 @@
 const WebSocket = require('ws');
 const os = require('os');
 const crypto = require('crypto');
+const dns = require('dns');
 
-// Get local IP addresses
+// Get all local IP addresses
 function getLocalIpAddresses() {
   const interfaces = os.networkInterfaces();
   const addresses = [];
   
   for (const name of Object.keys(interfaces)) {
     for (const iface of interfaces[name]) {
-      // Skip internal and non-IPv4 addresses
-      if (!iface.internal && iface.family === 'IPv4') {
-        addresses.push(iface.address);
+      // Skip internal addresses but include both IPv4 and IPv6
+      if (!iface.internal) {
+        addresses.push({
+          address: iface.address,
+          family: iface.family,
+          interface: name
+        });
       }
     }
   }
@@ -49,14 +54,34 @@ function decrypt(encryptedData) {
 
 const port = 8080;
 const addresses = getLocalIpAddresses();
-console.log(`Available IP addresses: ${addresses.join(', ')}`);
+
+// Print detailed network information
+console.log('Network Interfaces:');
+addresses.forEach(addr => {
+  console.log(`- ${addr.interface}: ${addr.address} (${addr.family})`);
+});
+
+// Get hostname
+dns.lookup(os.hostname(), (err, address, family) => {
+  if (err) {
+    console.error('Error getting hostname:', err);
+  } else {
+    console.log(`Hostname: ${os.hostname()}`);
+    console.log(`Primary address: ${address} (IPv${family})`);
+  }
+});
 
 const wss = new WebSocket.Server({ 
   port,
-  host: '0.0.0.0' // Listen on all interfaces
+  host: '0.0.0.0', // Listen on all interfaces
+  perMessageDeflate: false // Disable compression for better compatibility
 });
 
 console.log(`WebSocket server created on port ${port}`);
+console.log('Server is accessible at:');
+addresses.forEach(addr => {
+  console.log(`ws://${addr.address}:${port}`);
+});
 
 // Store connected clients
 const clients = new Set();
@@ -64,13 +89,14 @@ const clients = new Set();
 wss.on('connection', (ws, req) => {
   const clientIp = req.socket.remoteAddress;
   console.log(`New client connected from ${clientIp}`);
+  console.log('Connection headers:', req.headers);
   clients.add(ws);
 
-  // Send welcome message immediately
+  // Send welcome message with all available addresses
   const welcomeMessage = {
     type: 'system',
     status: 'Connected',
-    message: `Connected to chat server. Available at: ${addresses.join(', ')}:${port}`
+    message: `Connected to chat server. Available at: ${addresses.map(a => a.address).join(', ')}:${port}`
   };
   
   try {
@@ -83,6 +109,7 @@ wss.on('connection', (ws, req) => {
   ws.on('message', (message) => {
     try {
       const data = JSON.parse(message);
+      console.log(`Received ${data.type} message from ${clientIp}`);
       
       if (data.type === 'ping') {
         ws.send(JSON.stringify({ type: 'pong' }));
@@ -161,5 +188,14 @@ process.on('SIGINT', () => {
     process.exit(0);
   });
 });
+
+// Print active connections every 30 seconds
+setInterval(() => {
+  const activeClients = Array.from(clients).filter(c => c.readyState === WebSocket.OPEN);
+  console.log(`Active connections: ${activeClients.length}`);
+  activeClients.forEach((client, i) => {
+    console.log(`- Client ${i + 1}: ${client._socket.remoteAddress}`);
+  });
+}, 30000);
 
 console.log('Server setup complete');
