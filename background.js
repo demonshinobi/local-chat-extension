@@ -85,7 +85,10 @@ async function connect(targetIp = null) {
   try {
     // Use provided IP or get stored IP
     serverIp = targetIp || await getServerIp();
-    console.log('Trying to connect to:', serverIp);
+    if (serverIp === 'localhost') {
+    serverIp = '127.0.0.1';
+  }
+  console.log('Trying to connect to:', serverIp);
 
     updateStatus('Connecting', `Trying ${serverIp}...`);
 
@@ -96,7 +99,7 @@ async function connect(targetIp = null) {
     ws.onopen = () => {
       console.log('WebSocket connected successfully');
       reconnectAttempts = 0;
-      updateStatus('Connected', '', serverIp);
+      updateStatus('Connected', 'Connected to chat server', serverIp);
 
       // Setup ping interval
       clearInterval(pingInterval);
@@ -117,11 +120,27 @@ async function connect(targetIp = null) {
         switch (data.type) {
           case 'system':
             console.log('Received system message:', data);
-            updateStatus(data.status || 'Connected', data.message, serverIp);
+            updateStatus('Connected', data.message || 'Connected to chat server', serverIp);
             break;
 
           case 'pong':
             console.log('Received pong');
+            break;
+
+          case 'image':
+            console.log('Received image message:', data);
+            // Add received image message to history
+            const receivedImage = {
+              type: 'messageReceived',
+              message: { image: data.message.image },
+              from: data.from,
+              timestamp: data.timestamp,
+              read: false
+            };
+            addMessageToHistory(receivedImage);
+            chrome.runtime.sendMessage(receivedImage).catch(err => {
+              console.log('No popup open to receive image message');
+            });
             break;
 
           case 'chat':
@@ -151,7 +170,7 @@ async function connect(targetIp = null) {
     ws.onclose = () => {
       console.log('WebSocket closed');
       clearInterval(pingInterval);
-      updateStatus('Disconnected');
+      updateStatus('Disconnected', 'Connection closed');
       isConnecting = false;
 
       // Try to reconnect with exponential backoff
@@ -163,13 +182,13 @@ async function connect(targetIp = null) {
 
     ws.onerror = (error) => {
       console.error('WebSocket error:', error);
-      updateStatus('Error', 'Connection error');
+      updateStatus('Error', 'Failed to connect to server');
       isConnecting = false;
     };
 
   } catch (error) {
     console.error('Failed to create WebSocket:', error);
-    updateStatus('Error', 'Failed to connect');
+    updateStatus('Error', 'Failed to connect to server');
     isConnecting = false;
   }
 }
@@ -263,6 +282,45 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ success: false, error: error.message });
       }
       break;
+  case 'sendImageMessage':
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      sendResponse({ success: false, error: 'Not connected' });
+      return true;
+    }
+
+    const imageData = message.imageData;
+    if (!imageData) {
+      sendResponse({ success: false, error: 'Empty image data' });
+      return true;
+    }
+
+    try {
+      const imageMessage = {
+        type: 'image',
+        message: { image: imageData },
+        timestamp: new Date().toISOString()
+,
+        message_text: message.text || ''
+      };
+      ws.send(JSON.stringify(imageMessage));
+
+      // Add sent image message to history
+      const sentImageMessage = {
+        type: 'messageReceived',
+        message: { image: imageData },
+        message_text: message.text || '',
+        from: 'self',
+        timestamp: imageMessage.timestamp,
+        read: true
+      };
+      addMessageToHistory(sentImageMessage);
+
+      sendResponse({ success: true });
+    } catch (error) {
+      console.error('Error sending image message:', error);
+      sendResponse({ success: false, error: error.message });
+    }
+    return true;
   }
   return true; // Keep channel open for sendResponse
 });

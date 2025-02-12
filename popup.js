@@ -3,6 +3,11 @@ document.addEventListener('DOMContentLoaded', () => {
   const statusEl = document.getElementById('connection-status');
   const messagesEl = document.getElementById('messages');
   const inputEl = document.getElementById('message-input');
+  const sendImageButton = document.getElementById('send-image-button');
+  const imageInput = document.getElementById('image-input');
+  const imagePreview = document.getElementById('image-preview');
+  const previewImg = document.getElementById('preview-img');
+  const removeImageBtn = document.getElementById('remove-image');
   const sendButton = document.getElementById('send-button');
   const serverIpInput = document.getElementById('server-ip');
   const connectButton = document.getElementById('connect-button');
@@ -10,13 +15,18 @@ document.addEventListener('DOMContentLoaded', () => {
   const settingsPanel = document.getElementById('settings-panel');
   const notificationToggle = document.getElementById('notification-toggle');
   const clearHistoryButton = document.getElementById('clear-history');
+  const darkModeToggle = document.getElementById('dark-mode-toggle');
 
   let connected = false;
   let unreadMessages = new Set();
+  let currentImageData = null;
 
   // Load settings
-  chrome.storage.local.get(['notificationsEnabled'], (result) => {
-    notificationToggle.checked = result.notificationsEnabled || false;
+  chrome.storage.local.get(['notificationsEnabled', 'darkMode'], (result) => {
+    const { notificationsEnabled = false, darkMode = false } = result;
+    notificationToggle.checked = notificationsEnabled || false;
+    document.documentElement.setAttribute('data-theme', darkMode ? 'dark' : 'light');
+    darkModeToggle.checked = darkMode;
   });
 
   // Settings toggle
@@ -40,6 +50,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
+  darkModeToggle.addEventListener('change', () => {
+    const isDarkMode = darkModeToggle.checked;
+    document.documentElement.setAttribute('data-theme', isDarkMode ? 'dark' : 'light');
+    chrome.storage.local.set({ darkMode: isDarkMode });
+  });
+
   // Clear history
   clearHistoryButton.addEventListener('click', () => {
     if (confirm('Are you sure you want to clear all chat history?')) {
@@ -61,12 +77,14 @@ document.addEventListener('DOMContentLoaded', () => {
     
     switch(status) {
       case 'Connected':
+      case 'system':
         statusEl.style.color = 'var(--success-color)';
         connected = true;
-        statusEl.textContent = serverIp ? `Connected to ${serverIp}` : 'Connected';
+        statusEl.textContent = message || (serverIp ? `Connected to ${serverIp}` : 'Connected');
         inputEl.disabled = false;
         sendButton.disabled = false;
-        serverIpInput.value = serverIp;
+        sendImageButton.disabled = false;
+        serverIpInput.value = serverIp || 'localhost';
         break;
         
       case 'Connecting':
@@ -75,6 +93,7 @@ document.addEventListener('DOMContentLoaded', () => {
         statusEl.textContent = message || 'Connecting...';
         inputEl.disabled = true;
         sendButton.disabled = true;
+        sendImageButton.disabled = true;
         break;
         
       case 'Disconnected':
@@ -83,6 +102,7 @@ document.addEventListener('DOMContentLoaded', () => {
         statusEl.textContent = 'Disconnected';
         inputEl.disabled = true;
         sendButton.disabled = true;
+        sendImageButton.disabled = true;
         break;
         
       case 'Error':
@@ -91,6 +111,7 @@ document.addEventListener('DOMContentLoaded', () => {
         statusEl.textContent = message || 'Connection error';
         inputEl.disabled = true;
         sendButton.disabled = true;
+        sendImageButton.disabled = true;
         break;
         
       default:
@@ -99,6 +120,7 @@ document.addEventListener('DOMContentLoaded', () => {
         statusEl.textContent = message || status;
         inputEl.disabled = true;
         sendButton.disabled = true;
+        sendImageButton.disabled = true;
         break;
     }
   }
@@ -107,15 +129,29 @@ document.addEventListener('DOMContentLoaded', () => {
   function showNotification(message, from) {
     chrome.storage.local.get(['notificationsEnabled'], (result) => {
       if (result.notificationsEnabled && document.hidden) {
-        const notification = new Notification('Local Chat Pro', {
-          body: `${from}: ${message}`,
-          icon: 'icons/icon128.png'
-        });
-
-        notification.onclick = () => {
-          window.focus();
-          notification.close();
+      if (chrome.notifications) {
+        const options = {
+          type: 'basic',
+          iconUrl: 'icons/icon128.png',
+          title: 'Local Chat Pro',
+          message: `${from}: ${message}`
         };
+        chrome.notifications.create('', options, (notificationId) => {
+          // Auto-clear after 4 seconds.
+          setTimeout(() => { chrome.notifications.clear(notificationId); }, 4000);
+        });
+      } else {
+        // Fallback to Web Notifications.
+          const notification = new Notification('Local Chat Pro', {
+            body: `${from}: ${message}`,
+            icon: 'icons/icon128.png'
+          });
+
+          notification.onclick = () => {
+            window.focus();
+            notification.close();
+          };
+      };
       }
     });
   }
@@ -124,6 +160,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function addMessage(message, fromSelf = false, from = null, timestamp = null, read = true) {
     const div = document.createElement('div');
     div.classList.add('message');
+    let content = message;
     
     if (fromSelf) {
       div.classList.add('self');
@@ -136,13 +173,33 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const messageText = document.createElement('div');
     messageText.classList.add('message-text');
-    if (fromSelf) {
-      messageText.textContent = `You: ${message}`;
-    } else if (from) {
-      messageText.textContent = `${from}: ${message}`;
-      showNotification(message, from);
+
+    if (typeof message === 'object' && message.image) {
+      // Handle image message
+      const img = document.createElement('img');
+      img.src = message.image;
+      img.style.maxWidth = '200px';
+      img.style.maxHeight = '200px';
+      img.style.borderRadius = '8px';
+      messageText.appendChild(img);
+      
+      // Add text if present
+      if (message.message_text) {
+        const textDiv = document.createElement('div');
+        textDiv.style.marginTop = '8px';
+        textDiv.textContent = message.message_text;
+        messageText.appendChild(textDiv);
+      }
+      
+      content = message.message_text || 'Sent an image';
     } else {
-      messageText.textContent = message;
+      // Handle text message
+      if (fromSelf) {
+        messageText.textContent = `You: ${message}`;
+      } else if (from) {
+        messageText.textContent = `${from}: ${message}`;
+        showNotification(message, from);
+      }
     }
     div.appendChild(messageText);
 
@@ -198,7 +255,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Connect to server
   async function connectToServer() {
     const ip = serverIpInput.value.trim();
-    if (!ip) {
+    if (!ip && ip !== 'localhost') {
       updateStatus('Error', 'Please enter a server IP');
       return;
     }
@@ -218,21 +275,40 @@ document.addEventListener('DOMContentLoaded', () => {
   // Send a message
   async function sendMessage() {
     const text = inputEl.value.trim();
-    if (!text) return;
+    if (!text && !currentImageData) {
+      return;
+    }
 
-    console.log('Sending message:', text);
+    console.log('Sending message:', text, currentImageData ? '[with image]' : '');
 
     try {
-      const response = await chrome.runtime.sendMessage({
-        type: 'sendMessage',
-        text: text
-      });
+      let response;
+      
+      // Store text before clearing input
+      const messageText = text;
+      inputEl.value = '';
+      
+      if (currentImageData) {
+        response = await chrome.runtime.sendMessage({
+          type: 'sendImageMessage',
+          imageData: currentImageData,
+          text: messageText
+        });
+        // Clear the image preview after sending
+        addMessage({ image: currentImageData, message_text: messageText || '' }, true, null, new Date().toISOString(), true);
+        clearImagePreview();
+      } else {
+        response = await chrome.runtime.sendMessage({
+          type: 'sendMessage',
+          text: messageText
+        });
 
+        // Add message immediately to UI
+        addMessage(messageText, true, null, new Date().toISOString(), true);
+      }
       console.log('Send response:', response);
 
-      if (response && response.success) {
-        inputEl.value = '';
-      } else if (response && response.error) {
+      if (response && response.error) {
         console.error('Failed to send message:', response.error);
         updateStatus('Error', 'Failed to send message: ' + response.error);
       }
@@ -269,6 +345,92 @@ document.addEventListener('DOMContentLoaded', () => {
     if (e.key === 'Enter') {
       sendMessage();
     }
+  });
+
+  // Function to show image preview
+  function showImagePreview(imageData) {
+    currentImageData = imageData;
+    previewImg.src = imageData;
+    inputEl.placeholder = "Add a caption to your image...";
+    imagePreview.classList.add('visible');
+  }
+
+  // Function to clear image preview
+  function clearImagePreview() {
+    currentImageData = null;
+    previewImg.src = '';
+    inputEl.placeholder = "Type a message...";
+    imagePreview.classList.remove('visible');
+  }
+
+  // Handle paste events for images
+  inputEl.addEventListener('paste', (e) => {
+    const items = e.clipboardData.items;
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.indexOf('image') !== -1) {
+        e.preventDefault();
+        const file = items[i].getAsFile();
+        const reader = new FileReader();
+        reader.onload = (e) => showImagePreview(e.target.result);
+        reader.readAsDataURL(file);
+        break;
+      }
+    }
+  });
+
+  // Handle drag and drop for images
+  inputEl.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    inputEl.classList.add('drag-over');
+  });
+
+  inputEl.addEventListener('drop', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const files = e.dataTransfer.files;
+    if (files[0] && files[0].type.startsWith('image/')) {
+      const reader = new FileReader();
+      reader.onload = (e) => showImagePreview(e.target.result);
+      reader.readAsDataURL(files[0]);
+    }
+    inputEl.classList.remove('drag-over');
+  });
+
+  // Remove drag-over class when dragging leaves the input
+  inputEl.addEventListener('dragleave', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    inputEl.classList.remove('drag-over');
+  });
+
+  inputEl.addEventListener('dragend', (e) => {
+    e.preventDefault();
+    inputEl.classList.remove('drag-over');
+  });
+
+  // Remove image button handler
+  removeImageBtn.addEventListener('click', () => {
+    clearImagePreview();
+  });
+
+  // Add functionality for sending image messages
+  if (sendImageButton) {
+    sendImageButton.addEventListener('click', () => {
+      imageInput.click();
+    });
+  }
+
+  imageInput.addEventListener('change', () => {
+    if (imageInput.files && imageInput.files[0]) {
+      const file = imageInput.files[0];
+      const reader = new FileReader();
+      reader.onload = (e) => showImagePreview(e.target.result);
+      reader.readAsDataURL(file);
+      imageInput.value = '';
+    }
+    // Reset the file input for future uploads
+    imageInput.value = '';
   });
 
   // Listen for visibility change
@@ -310,6 +472,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Start with disabled input until connected
   inputEl.disabled = true;
   sendButton.disabled = true;
+  serverIpInput.value = 'localhost';
   updateStatus('Connecting', 'Initializing connection...');
 
   // Request initial connection status and message history

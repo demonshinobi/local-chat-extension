@@ -11,10 +11,29 @@
       --secondary-color: #1e40af;
       --success-color: #16a34a;
       --danger-color: #dc2626;
-      --text-color: #1f2937;
-      --bg-color: #ffffff;
-      --bg-secondary: #f3f4f6;
-      --border-color: #e5e7eb;
+      --text-color: var(--light-text);
+      --bg-color: var(--light-bg);
+      --bg-secondary: var(--light-bg-secondary);
+      --border-color: var(--light-border);
+
+      /* Light theme colors */
+      --light-text: #1f2937;
+      --light-bg: #ffffff;
+      --light-bg-secondary: #f3f4f6;
+      --light-border: #e5e7eb;
+
+      /* Dark theme colors */
+      --dark-text: #e5e7eb;
+      --dark-bg: #1f2937;
+      --dark-bg-secondary: #374151;
+      --dark-border: #4b5563;
+    }
+
+    [data-theme="dark"] {
+      --text-color: var(--dark-text);
+      --bg-color: var(--dark-bg);
+      --bg-secondary: var(--dark-bg-secondary);
+      --border-color: var(--dark-border);
     }
 
     body {
@@ -144,7 +163,7 @@
       padding: 10px 14px;
       border-radius: 12px;
       background: var(--bg-secondary);
-      max-width: 85%;
+      max-width: 80%;
       word-wrap: break-word;
       box-shadow: 0 1px 2px rgba(0,0,0,0.05);
       animation: fadeIn 0.3s ease-out;
@@ -163,12 +182,13 @@
 
     .timestamp {
       font-size: 12px;
-      color: #666;
+      color: var(--text-color);
       margin-top: 4px;
+      opacity: 0.7;
     }
 
     .message.self .timestamp {
-      color: rgba(255,255,255,0.8);
+      opacity: 0.8;
     }
 
     .input-area {
@@ -192,7 +212,8 @@
     }
 
     #message-input:disabled {
-      background: var(--bg-secondary);
+      background: var(--bg-color);
+      color: var(--text-color);
       cursor: not-allowed;
     }
 
@@ -217,6 +238,81 @@
     #send-button:disabled {
       background: #ccc;
       cursor: not-allowed;
+    }
+
+    .input-container {
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      margin-bottom: 8px;
+      overflow: hidden;
+    }
+
+    .image-preview {
+      display: none;
+      padding: 8px;
+      background: var(--bg-secondary);
+      position: relative;
+    }
+
+    .image-preview.visible {
+      display: block;
+    }
+
+    .image-preview img {
+      max-width: 200px;
+      max-height: 150px;
+      border-radius: 4px;
+      display: block;
+      margin: 0 auto;
+    }
+
+    #message-input.drag-over {
+      border-color: var(--primary-color);
+      background-color: rgba(37, 99, 235, 0.1);
+      box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2);
+    }
+
+    #message-input::placeholder {
+      transition: color 0.2s;
+    }
+
+    .remove-image {
+      position: absolute;
+      top: 4px;
+      right: 4px;
+      cursor: pointer;
+      background: rgba(0,0,0,0.5);
+      color: white;
+      border-radius: 50%;
+      padding: 4px;
+      line-height: 1;
+    }
+
+    #send-image-button {
+      background: var(--primary-color);
+      color: white;
+      padding: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 40px;
+    }
+    
+    #send-image-button:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+    }
+    
+    #send-image-button:hover:not(:disabled) {
+      background: var(--secondary-color);
+    }
+    
+    /* Image message styles */
+    .message img {
+      display: block;
+      margin: 4px 0;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      transition: transform 0.2s;
     }
 
     #clear-history {
@@ -263,7 +359,7 @@
       left: 0;
       right: 0;
       bottom: 0;
-      background-color: #ccc;
+      background-color: var(--border-color);
       transition: .4s;
       border-radius: 24px;
     }
@@ -306,6 +402,13 @@
         <span class="slider"></span>
       </label>
     </div>
+    <div class="setting-row">
+      <label for="dark-mode-toggle">Dark Mode</label>
+      <label class="switch">
+        <input type="checkbox" id="dark-mode-toggle">
+        <span class="slider"></span>
+      </label>
+    </div>
   </div>
 
   <div id="connection-status">Connecting...</div>
@@ -318,8 +421,16 @@
   <div id="messages"></div>
 
   <div class="input-area">
-    <input type="text" id="message-input" placeholder="Type a message..." disabled>
-    <button id="send-button" class="action-button" disabled>Send</button>
+    <div class="input-container">
+      <div class="image-preview" id="image-preview">
+        <span class="remove-image" id="remove-image">×</span>
+        <img id="preview-img">
+      </div>
+      <input type="text" id="message-input" placeholder="Type a message..." disabled>
+      <button id="send-button" class="action-button" disabled>Send</button>
+      
+      <input type="file" id="image-input" accept="image/*" style="display:none">
+    </div>
   </div>
 
   <div class="footer">
