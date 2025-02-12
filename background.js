@@ -1,16 +1,39 @@
 // Global variables
-let ws = null;
 let reconnectAttempts = 0;
-let pingInterval = null;
 let serverIp = 'localhost';
 let messageHistory = [];
 const MAX_HISTORY = 100; // Store up to 100 messages
 let currentStatus = { type: 'connectionStatus', status: 'Disconnected' };
 let isConnecting = false;
 
+// Begin Offscreen API helper function
+async function ensureOffscreenDocument() {
+  if (!chrome.offscreen) {
+    console.error('Offscreen API not available.');
+    return false;
+  }
+  
+  try {
+    const exists = await chrome.offscreen.hasDocument();
+    if (!exists) {
+      await chrome.offscreen.createDocument({
+        url: "offscreen.html",
+        reasons: ["WORKERS"],
+        justification: "WebSocket connection for chat"
+      });
+      console.log('Offscreen document created.');
+    } else {
+      console.log('Offscreen document already exists.');
+    }
+    return true;
+  } catch (error) {
+    console.error('Failed to create/check offscreen document:', error);
+    return false;
+  }
+}
+
 // Store message in history (avoid duplicates)
 function addMessageToHistory(message) {
-  // Check for duplicates based on timestamp and content
   const isDuplicate = messageHistory.some(m => 
     m.timestamp === message.timestamp && 
     m.message === message.message && 
@@ -20,9 +43,8 @@ function addMessageToHistory(message) {
   if (!isDuplicate) {
     messageHistory.push(message);
     if (messageHistory.length > MAX_HISTORY) {
-      messageHistory.shift(); // Remove oldest message
+      messageHistory.shift();
     }
-    // Save to Chrome storage
     chrome.storage.local.set({ messageHistory: messageHistory }, () => {
       console.log('Message history saved');
     });
@@ -47,9 +69,14 @@ function saveServerIp(ip) {
 // Get the stored server IP
 async function getServerIp() {
   return new Promise((resolve) => {
-    chrome.storage.local.get('serverIp', (result) => {
-      resolve(result.serverIp || 'localhost');
-    });
+    try {
+      chrome.storage.local.get(['serverIp'], (result) => {
+        const ip = result.serverIp;
+        resolve(ip === 'localhost' ? '127.0.0.1' : (ip || '127.0.0.1'));
+      });
+    } catch (error) {
+      resolve('127.0.0.1');
+    }
   });
 }
 
@@ -62,133 +89,55 @@ function updateStatus(status, message = '', serverIp = '') {
     serverIp 
   };
   
-  // Broadcast to all listeners
   chrome.runtime.sendMessage(currentStatus).catch(err => {
     console.log('No popup open to receive status');
   });
 }
 
-// Connect to WebSocket server
+// Connect to WebSocket server via offscreen document
 async function connect(targetIp = null) {
   if (isConnecting) {
-    console.log('Connection attempt already in progress');
-    return;
-  }
-
-  if (ws && ws.readyState !== WebSocket.CLOSED) {
-    console.log('Connection already exists');
+    console.log('Connection attempt in progress, waiting...');
     return;
   }
 
   isConnecting = true;
+  updateStatus('Connecting', 'Initializing connection...');
 
   try {
-    // Use provided IP or get stored IP
+    // Get and save IP
     serverIp = targetIp || await getServerIp();
-    if (serverIp === 'localhost') {
-    serverIp = '127.0.0.1';
-  }
-  console.log('Trying to connect to:', serverIp);
+    if (targetIp) {
+      saveServerIp(serverIp);
+    }
 
-    updateStatus('Connecting', `Trying ${serverIp}...`);
+    // Ensure offscreen document exists
+    const offscreenReady = await ensureOffscreenDocument();
+    if (!offscreenReady) {
+      throw new Error('Failed to initialize offscreen document');
+    }
 
-    const wsUrl = `ws://${serverIp}:8080`;
-    console.log('Creating WebSocket connection to:', wsUrl);
-    ws = new WebSocket(wsUrl);
-
-    ws.onopen = () => {
-      console.log('WebSocket connected successfully');
-      reconnectAttempts = 0;
-      updateStatus('Connected', 'Connected to chat server', serverIp);
-
-      // Setup ping interval
-      clearInterval(pingInterval);
-      pingInterval = setInterval(() => {
-        if (ws && ws.readyState === WebSocket.OPEN) {
-          console.log('Sending ping...');
-          ws.send(JSON.stringify({ type: 'ping' }));
+    // Send connection request to offscreen document
+    const response = await new Promise((resolve) => {
+      chrome.runtime.sendMessage({
+        type: 'updateConnection',
+        serverIp: serverIp
+      }, (response) => {
+        if (chrome.runtime.lastError) {
+          resolve({ success: false, error: chrome.runtime.lastError.message });
+        } else {
+          resolve(response || { success: false });
         }
-      }, 15000);
-    };
+      });
+    });
 
-    ws.onmessage = async (event) => {
-      console.log('Received message:', event.data);
-      try {
-        const data = JSON.parse(event.data);
-        console.log('Parsed message:', data);
-
-        switch (data.type) {
-          case 'system':
-            console.log('Received system message:', data);
-            updateStatus('Connected', data.message || 'Connected to chat server', serverIp);
-            break;
-
-          case 'pong':
-            console.log('Received pong');
-            break;
-
-          case 'image':
-            console.log('Received image message:', data);
-            // Add received image message to history
-            const receivedImage = {
-              type: 'messageReceived',
-              message: { image: data.message.image },
-              from: data.from,
-              timestamp: data.timestamp,
-              read: false
-            };
-            addMessageToHistory(receivedImage);
-            chrome.runtime.sendMessage(receivedImage).catch(err => {
-              console.log('No popup open to receive image message');
-            });
-            break;
-
-          case 'chat':
-            console.log('Received chat message:', data);
-            // Add received message to history
-            const receivedMessage = {
-              type: 'messageReceived',
-              message: data.message,
-              from: data.from,
-              timestamp: data.timestamp,
-              read: false
-            };
-            addMessageToHistory(receivedMessage);
-            chrome.runtime.sendMessage(receivedMessage).catch(err => {
-              console.log('No popup open to receive chat message');
-            });
-            break;
-
-          default:
-            console.log('Unknown message type:', data.type);
-        }
-      } catch (error) {
-        console.error('Error processing message:', error);
-      }
-    };
-
-    ws.onclose = () => {
-      console.log('WebSocket closed');
-      clearInterval(pingInterval);
-      updateStatus('Disconnected', 'Connection closed');
-      isConnecting = false;
-
-      // Try to reconnect with exponential backoff
-      const backoff = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000);
-      reconnectAttempts++;
-      console.log(`Attempting to reconnect in ${backoff}ms`);
-      setTimeout(() => connect(), backoff);
-    };
-
-    ws.onerror = (error) => {
-      console.error('WebSocket error:', error);
-      updateStatus('Error', 'Failed to connect to server');
-      isConnecting = false;
-    };
+    if (!response.success) {
+      throw new Error(response.error || 'Failed to establish connection');
+    }
 
   } catch (error) {
-    console.error('Failed to create WebSocket:', error);
-    updateStatus('Error', 'Failed to connect to server');
+    console.error('Connection failed:', error);
+    updateStatus('Error', error.message || 'Failed to connect to server');
     isConnecting = false;
   }
 }
@@ -201,11 +150,22 @@ chrome.storage.local.get('messageHistory', (result) => {
   }
 });
 
-// Handle messages from popup
+// Handle messages from popup and offscreen document
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  console.log('Received message from popup:', message);
+  console.log('Received message:', message);
+  
+  // Check if message is from offscreen document
+  const isFromOffscreen = sender.documentId && chrome.offscreen;
+  if (isFromOffscreen && message.type !== 'updateConnection') {
+    console.log('Message from offscreen document:', message);
+  }
   
   switch (message.type) {
+    case 'connectionStatus':
+      updateStatus(message.status, message.message, message.serverIp);
+      isConnecting = false;
+      break;
+
     case 'getStatus':
       console.log('Sending current status:', currentStatus);
       sendResponse(currentStatus);
@@ -238,100 +198,36 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     case 'connectTo':
       if (message.ip) {
         saveServerIp(message.ip);
-        if (ws) {
-          ws.close();
-        }
         connect(message.ip);
         sendResponse({ success: true });
       }
       break;
 
-    case 'sendMessage':
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        sendResponse({ success: false, error: 'Not connected' });
-        return true;
-      }
-
-      const text = message.text;
-      if (!text.trim()) {
-        sendResponse({ success: false, error: 'Empty message' });
-        return true;
-      }
-
-      try {
-        const chatMessage = {
-          type: 'chat',
-          message: text,
-          timestamp: new Date().toISOString()
-        };
-        ws.send(JSON.stringify(chatMessage));
-
-        // Add sent message to history
-        const sentMessage = {
-          type: 'messageReceived',
-          message: text,
-          from: 'self',
-          timestamp: chatMessage.timestamp,
-          read: true
-        };
-        addMessageToHistory(sentMessage);
-        
-        sendResponse({ success: true });
-      } catch (error) {
-        console.error('Error sending message:', error);
-        sendResponse({ success: false, error: error.message });
-      }
+    case 'messageReceived':
+      addMessageToHistory(message);
+      chrome.runtime.sendMessage(message).catch(err => {
+        console.log('No popup open to receive message');
+      });
       break;
-  case 'sendImageMessage':
-    if (!ws || ws.readyState !== WebSocket.OPEN) {
-      sendResponse({ success: false, error: 'Not connected' });
-      return true;
-    }
-
-    const imageData = message.imageData;
-    if (!imageData) {
-      sendResponse({ success: false, error: 'Empty image data' });
-      return true;
-    }
-
-    try {
-      const imageMessage = {
-        type: 'image',
-        message: { image: imageData },
-        timestamp: new Date().toISOString()
-,
-        message_text: message.text || ''
-      };
-      ws.send(JSON.stringify(imageMessage));
-
-      // Add sent image message to history
-      const sentImageMessage = {
-        type: 'messageReceived',
-        message: { image: imageData },
-        message_text: message.text || '',
-        from: 'self',
-        timestamp: imageMessage.timestamp,
-        read: true
-      };
-      addMessageToHistory(sentImageMessage);
-
-      sendResponse({ success: true });
-    } catch (error) {
-      console.error('Error sending image message:', error);
-      sendResponse({ success: false, error: error.message });
-    }
-    return true;
   }
-  return true; // Keep channel open for sendResponse
+  return true;
 });
 
 // Handle initialization
 let initialized = false;
-function initialize() {
-  if (!initialized) {
-    initialized = true;
-    console.log('Extension initializing...');
-    connect();
+async function initialize() {
+  if (initialized) return;
+  initialized = true;
+  console.log('Extension initializing...');
+
+  try {
+    const savedIp = await getServerIp();
+    serverIp = savedIp;
+    console.log('Loaded saved server IP:', serverIp);
+    connect(serverIp);
+  } catch (error) {
+    console.error('Failed to load saved IP:', error);
+    connect('127.0.0.1');
   }
 }
 

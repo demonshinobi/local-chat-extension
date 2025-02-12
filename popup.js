@@ -75,6 +75,12 @@ document.addEventListener('DOMContentLoaded', () => {
   function updateStatus(status, message = '', serverIp = '') {
     console.log('Status update:', { status, message, serverIp });
     
+    // If DOM elements aren't available, store the status and return
+    if (!statusEl || !inputEl || !sendButton || !serverIpInput) {
+      currentStatus = { status, message, serverIp };
+      return;
+    }
+
     switch(status) {
       case 'Connected':
       case 'system':
@@ -83,7 +89,7 @@ document.addEventListener('DOMContentLoaded', () => {
         statusEl.textContent = message || (serverIp ? `Connected to ${serverIp}` : 'Connected');
         inputEl.disabled = false;
         sendButton.disabled = false;
-        sendImageButton.disabled = false;
+        if (sendImageButton) sendImageButton.disabled = false;
         serverIpInput.value = serverIp || 'localhost';
         break;
         
@@ -93,7 +99,7 @@ document.addEventListener('DOMContentLoaded', () => {
         statusEl.textContent = message || 'Connecting...';
         inputEl.disabled = true;
         sendButton.disabled = true;
-        sendImageButton.disabled = true;
+        if (sendImageButton) sendImageButton.disabled = true;
         break;
         
       case 'Disconnected':
@@ -102,7 +108,7 @@ document.addEventListener('DOMContentLoaded', () => {
         statusEl.textContent = 'Disconnected';
         inputEl.disabled = true;
         sendButton.disabled = true;
-        sendImageButton.disabled = true;
+        if (sendImageButton) sendImageButton.disabled = true;
         break;
         
       case 'Error':
@@ -111,7 +117,7 @@ document.addEventListener('DOMContentLoaded', () => {
         statusEl.textContent = message || 'Connection error';
         inputEl.disabled = true;
         sendButton.disabled = true;
-        sendImageButton.disabled = true;
+        if (sendImageButton) sendImageButton.disabled = true;
         break;
         
       default:
@@ -120,7 +126,7 @@ document.addEventListener('DOMContentLoaded', () => {
         statusEl.textContent = message || status;
         inputEl.disabled = true;
         sendButton.disabled = true;
-        sendImageButton.disabled = true;
+        if (sendImageButton) sendImageButton.disabled = true;
         break;
     }
   }
