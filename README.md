@@ -48,6 +48,45 @@ A Chrome extension for local network chat with persistent messaging, image shari
    - Toggle dark mode in settings
    - Clear message history if needed
 
+## Network Connectivity
+
+If you're having trouble connecting from different computers on the same network, follow these steps:
+
+### For the Server Host:
+
+1. Run the included `network-test.bat` script to:
+   - Check your network interfaces and IP addresses
+   - Add a Windows Firewall exception for port 8080
+   - Test if your computer is accessible from other machines
+
+2. Make sure you're using the correct IP address:
+   - The server displays all available IP addresses on startup
+   - For computers in the same building but different networks, use your machine's actual IP address (not localhost or 127.0.0.1)
+   - Typically, use the IP that starts with 192.168.x.x or 10.x.x.x
+
+3. Check your firewall settings:
+   - Ensure Windows Firewall allows incoming connections on port 8080
+   - If using third-party antivirus/firewall software, add an exception for the chat server
+
+### For Clients:
+
+1. Make sure you're on the same network as the server host
+   - If on different networks, you may need VPN or network bridging
+
+2. Enter the correct server IP address:
+   - Use the IP address of the server host's computer (not localhost)
+   - The IP should be visible in the server console when it starts
+
+3. Test connectivity:
+   - Try accessing http://SERVER_IP:8080 in a web browser
+   - If this works but the chat doesn't connect, check the extension settings
+
+### Troubleshooting:
+
+- **"Cannot connect to server"**: Verify the server is running and the IP address is correct
+- **Server running but clients can't connect**: Check firewall settings and run `network-test.bat`
+- **Connection drops frequently**: Ensure stable network connection and try a different IP address
+
 ## Server
 
 The extension includes a WebSocket server built with Node.js. The server:
@@ -65,6 +104,7 @@ To start the server, run `setup.bat` in the extension directory.
 - **Backend**: Node.js WebSocket server
 - **Storage**: Local file-based persistence
 - **Encryption**: AES-256-GCM
+- **Networking**: WebSocket on port 8080
 
 ## License
 
