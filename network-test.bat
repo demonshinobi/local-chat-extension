@@ -36,22 +36,6 @@ if %errorlevel% neq 0 (
 )
 echo.
 
-REM Start a simple HTTP server for testing
-echo Starting a test server on port 8080...
-echo This will help verify if other computers can connect to your machine.
-echo.
-echo Press Ctrl+C to stop the test server when done.
-echo.
-echo Test server is running. From another computer, try to connect to:
-echo.
-ipconfig | findstr /i "IPv4"
-echo.
-echo Use a web browser and navigate to http://YOUR_IP:8080
-echo (Replace YOUR_IP with one of the IP addresses listed above)
-echo.
-echo If the connection works, you should see a "Connection successful!" message.
-echo.
-
 REM Create a simple HTML file for the test
 echo ^<!DOCTYPE html^> > test.html
 echo ^<html^> >> test.html
@@ -63,8 +47,30 @@ echo ^<p^>Use this IP address in the Local Chat Extension.^</p^> >> test.html
 echo ^</body^> >> test.html
 echo ^</html^> >> test.html
 
+REM Start a simple HTTP server for testing
+echo Starting a test server on port 8080...
+echo This will help verify if other computers can connect to your machine.
+echo.
+echo Test server is running. From another computer, try to connect to:
+echo.
+ipconfig | findstr /i "IPv4"
+echo.
+echo Use a web browser and navigate to http://YOUR_IP:8080
+echo (Replace YOUR_IP with one of the IP addresses listed above)
+echo.
+echo If the connection works, you should see a "Connection successful!" message.
+echo.
+echo Press Ctrl+C to stop the test server when done.
+echo.
+echo DO NOT CLOSE THIS WINDOW while testing connectivity.
+echo.
+pause
+
 REM Start a simple HTTP server using Node.js
-node -e "const http = require('http'); const fs = require('fs'); const server = http.createServer((req, res) => { res.writeHead(200, {'Content-Type': 'text/html'}); res.end(fs.readFileSync('test.html')); }); server.listen(8080, '0.0.0.0', () => console.log('Test server running on port 8080'));"
+node -e "const http = require('http'); const fs = require('fs'); const server = http.createServer((req, res) => { res.writeHead(200, {'Content-Type': 'text/html'}); res.end(fs.readFileSync('test.html')); }); server.listen(8080, '0.0.0.0', () => console.log('Test server running on port 8080')); console.log('Press Ctrl+C to stop the server.');"
 
 REM Clean up
 del test.html
+
+REM Keep window open
+pause
