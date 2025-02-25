@@ -1,77 +1,77 @@
-# Local Network Chat Extension
+# Local Chat Pro
 
-A Chrome extension for encrypted chat communication over local network using WebSocket.
+A secure local network chat extension for Chrome with encryption and persistent message history.
 
 ## Features
 
-- Real-time chat between Chrome browsers on the same local network
-- End-to-end encryption using AES-256-GCM
-- Message history (stores last 50 messages in memory)
-- Automatic server discovery on local network
-- Clean and simple user interface
+- **Secure Communication**: End-to-end encrypted messages
+- **Persistent Connections**: Automatically reconnects when the connection is lost
+- **User Identification**: Display names for better communication
+- **Rich Media Support**: Share images via drag & drop or clipboard
+- **Emoji Support**: Built-in emoji picker
+- **Typing Indicators**: See when others are typing
+- **Dark Mode**: Toggle between light and dark themes
+- **Desktop Notifications**: Get notified of new messages
+- **Message History**: Persistent message history across sessions
+- **Stable Server**: Can run as a Windows service
 
 ## Installation
 
-1. Clone this repository:
-```bash
-git clone https://github.com/demonshinobi/local-chat-extension.git
-cd local-chat-extension
-```
+1. Clone or download this repository
+2. Open Chrome and navigate to `chrome://extensions/`
+3. Enable "Developer mode" in the top right corner
+4. Click "Load unpacked" and select the `local-chat-extension` folder
+5. The extension is now installed and available in your browser
 
-2. Install server dependencies:
-```bash
-cd server
-npm install
-cd ..
-```
+## Server Setup
 
-3. Load the extension in Chrome:
-   - Open Chrome and go to `chrome://extensions/`
-   - Enable "Developer mode" in the top right
-   - Click "Load unpacked" and select the `local-chat-extension` folder
+### Option 1: Quick Start (Command Window)
 
-4. Run the server:
-   - Double-click `setup.bat` to install and start the server
-   - The server will run in the background and start automatically when you log in
+1. Run `setup.bat` to install and start the server
+2. The server will run in a command window
+3. Note the IP address displayed in the command window
+
+### Option 2: Windows Service (Recommended)
+
+1. Right-click on `install-service.bat` and select "Run as administrator"
+2. The script will install the server as a Windows service
+3. The service will automatically start when your computer boots
+4. Note the IP address displayed during installation
 
 ## Usage
 
-1. Click the extension icon in Chrome to open the chat popup
-2. The extension will automatically connect to any local chat server
-3. Type your message and press Enter or click Send
-4. Messages are encrypted and only visible to users on your local network
-5. Message history is preserved while the extension is running
+1. Click the Local Chat Pro icon in your browser toolbar
+2. Enter the server IP address (or use "localhost" if running on the same machine)
+3. Click "Connect"
+4. Once connected, you can start sending messages
+5. To share an image, drag and drop it into the message input or paste from clipboard
+6. To use emojis, click the emoji button and select an emoji
+7. To change settings, click the gear icon in the top right corner
 
-## Technical Details
+## Settings
 
-- Server: Node.js with WebSocket (ws) library
-- Encryption: AES-256-GCM with random IV for each message
-- Extension: Chrome Manifest V3
-- Network: Automatic local IP discovery and connection
+- **Desktop Notifications**: Enable/disable notifications for new messages
+- **Dark Mode**: Toggle between light and dark themes
+- **Display Name**: Set your name to be displayed to other users
 
-## Security
+## Troubleshooting
 
-- All messages are encrypted using AES-256-GCM
-- Each message uses a unique initialization vector (IV)
-- Messages are only stored in memory, not persisted to disk
-- Communication is limited to local network only
+- **Connection Issues**: Make sure the server is running and the IP address is correct
+- **Server Not Starting**: Check if port 8080 is already in use by another application
+- **Messages Not Sending**: Check your connection status in the extension
 
 ## Development
 
-To modify the extension:
+The extension is organized into several key files:
 
-1. Make your changes to the source files
-2. Reload the extension in Chrome
-3. For server changes, restart `setup.bat`
-
-## Files
-
-- `popup.html/js`: Extension popup UI and logic
-- `background.js`: Extension background service worker
+- `popup.html`: Main UI structure
+- `css/popup.css`: Styling for the UI
+- `js/ui.js`: UI-related functionality
+- `js/popup.js`: Core extension functionality
+- `background.js`: Background service worker for persistent connections
+- `offscreen.js`: Handles WebSocket connections in the background
 - `server/server.js`: WebSocket server implementation
-- `manifest.json`: Extension configuration
-- `setup.bat`: Server installation and startup script
 
 ## License
 
-MIT License - feel free to modify and use as needed!
+MIT

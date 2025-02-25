@@ -1,499 +1,503 @@
 document.addEventListener("DOMContentLoaded", () => {
-  // --- TIMER CONTROL VIA BACKGROUND ---
-  const startButton = document.getElementById("start-timer-btn");
-  const stopButton = document.getElementById("stop-timer-btn");
-  const resetButton = document.getElementById("reset-timer-btn");
-  const timerDisplay = document.getElementById("timerDisplay");
-  const sessionNameDisplay = document.getElementById("sessionNameDisplay"); // Session name element
-
-  // For continuous mode and session name
-  let continuousSetting = false;
-  let currentSessionName = "";
-
-  // Utility to set the session name text in the UI, and save to storage
-  function setSessionName(name) {
-    currentSessionName = name;
-    sessionNameDisplay.textContent = name || "";
-    // Persist the session name so it remains after popup closes
-    chrome.storage.sync.set({ currentSessionName: name });
-  }
-
-  // Load continuous mode and session name setting on startup
-  chrome.storage.sync.get(["continuousTiming", "currentSessionName"], (data) => {
-    continuousSetting = data.continuousTiming || false;
-    // If there's a saved session name, restore it
-    if (data.currentSessionName) {
-      setSessionName(data.currentSessionName);
-    }
+  // DOM Elements
+  const connectionStatus = document.getElementById("connection-status");
+  const serverIpInput = document.getElementById("server-ip");
+  const connectButton = document.getElementById("connect-button");
+  const messagesContainer = document.getElementById("messages");
+  const messageInput = document.getElementById("message-input");
+  const sendButton = document.getElementById("send-button");
+  const clearHistoryButton = document.getElementById("clear-history");
+  const settingsToggle = document.getElementById("settings-toggle");
+  const closeSettings = document.getElementById("close-settings");
+  const settingsPanel = document.getElementById("settings-panel");
+  const notificationToggle = document.getElementById("notification-toggle");
+  const darkModeToggle = document.getElementById("dark-mode-toggle");
+  
+  // State variables
+  let isConnected = false;
+  let messageHistory = [];
+  let currentServerIp = '';
+  let notificationsEnabled = false;
+  let darkModeEnabled = false;
+  let unreadCount = 0;
+  let imageData = null;
+  
+  // Create image preview elements
+  const imagePreviewContainer = document.createElement('div');
+  imagePreviewContainer.className = 'image-preview';
+  imagePreviewContainer.style.display = 'none';
+  
+  const previewImage = document.createElement('img');
+  previewImage.style.maxWidth = '100%';
+  previewImage.style.maxHeight = '150px';
+  previewImage.style.borderRadius = '8px';
+  previewImage.style.marginBottom = '8px';
+  
+  const removeImageButton = document.createElement('button');
+  removeImageButton.textContent = '✕';
+  removeImageButton.className = 'action-button';
+  removeImageButton.style.position = 'absolute';
+  removeImageButton.style.top = '4px';
+  removeImageButton.style.right = '4px';
+  removeImageButton.style.width = '24px';
+  removeImageButton.style.height = '24px';
+  removeImageButton.style.borderRadius = '50%';
+  removeImageButton.style.padding = '0';
+  removeImageButton.style.background = 'rgba(0,0,0,0.5)';
+  removeImageButton.style.color = 'white';
+  removeImageButton.title = 'Remove image';
+  
+  imagePreviewContainer.appendChild(previewImage);
+  imagePreviewContainer.appendChild(removeImageButton);
+  
+  // Add image preview to input container
+  const inputContainer = document.querySelector('.input-container');
+  inputContainer.insertBefore(imagePreviewContainer, messageInput);
+  
+  // Handle remove image button
+  removeImageButton.addEventListener('click', () => {
+    imageData = null;
+    imagePreviewContainer.style.display = 'none';
   });
-
-  // Query background for elapsed time every second
-  function updateDisplay() {
-    chrome.runtime.sendMessage({ action: "getElapsedTime" }, (response) => {
-      if (response && typeof response.elapsed === "number") {
-        timerDisplay.textContent = formatTime(response.elapsed);
-        setCircleProgress(response.elapsed);
+  
+  // Initialize settings
+  function loadSettings() {
+    chrome.storage.local.get(['notificationsEnabled', 'darkModeEnabled'], (result) => {
+      notificationsEnabled = result.notificationsEnabled || false;
+      darkModeEnabled = result.darkModeEnabled || false;
+      
+      notificationToggle.checked = notificationsEnabled;
+      darkModeToggle.checked = darkModeEnabled;
+      
+      if (darkModeEnabled) {
+        document.body.setAttribute('data-theme', 'dark');
       } else {
-        timerDisplay.textContent = "00:00:00";
-        setCircleProgress(0);
+        document.body.removeAttribute('data-theme');
       }
     });
   }
-
-  // Format milliseconds to HH:MM:SS
-  function formatTime(ms) {
-    const totalSeconds = Math.floor(ms / 1000);
-    const hours = Math.floor(totalSeconds / 3600);
-    const minutes = Math.floor((totalSeconds % 3600) / 60);
-    const seconds = totalSeconds % 60;
-    return (
-      (hours < 10 ? "0" + hours : hours) + ":" +
-      (minutes < 10 ? "0" + minutes : minutes) + ":" +
-      (seconds < 10 ? "0" + seconds : seconds)
-    );
+  
+  // Save settings
+  function saveSettings() {
+    chrome.storage.local.set({
+      notificationsEnabled: notificationsEnabled,
+      darkModeEnabled: darkModeEnabled
+    });
   }
-
-  // Update the circular ring based on elapsed time (1 revolution per hour)
-  function setCircleProgress(elapsedMs) {
-    const circle = document.querySelector(".progress-ring__progress");
-    if (!circle) return;
-
-    const circumference = 565.48; // 2 * Math.PI * 90
-    const totalSeconds = elapsedMs / 1000;
-    const minutes = totalSeconds / 60;
-    const fraction = (minutes % 60) / 60;
-    const offset = circumference - fraction * circumference;
-    circle.style.strokeDashoffset = offset;
+  
+  // Toggle settings panel
+  settingsToggle.addEventListener("click", () => {
+    settingsPanel.classList.toggle("visible");
+  });
+  
+  // Close settings panel
+  closeSettings.addEventListener("click", () => {
+    settingsPanel.classList.remove("visible");
+  });
+  
+  // Handle notification toggle
+  notificationToggle.addEventListener("change", () => {
+    notificationsEnabled = notificationToggle.checked;
+    saveSettings();
+    
+    if (notificationsEnabled) {
+      // Request notification permission if needed
+      Notification.requestPermission();
+    }
+  });
+  
+  // Handle dark mode toggle
+  darkModeToggle.addEventListener("change", () => {
+    darkModeEnabled = darkModeToggle.checked;
+    saveSettings();
+    
+    if (darkModeEnabled) {
+      document.body.setAttribute('data-theme', 'dark');
+    } else {
+      document.body.removeAttribute('data-theme');
+    }
+  });
+  
+  // Load message history from storage
+  function loadMessageHistory() {
+    chrome.runtime.sendMessage({ type: 'getHistory' }, (response) => {
+      if (response && response.messages) {
+        messageHistory = response.messages;
+        displayMessages();
+      }
+    });
   }
-
-  // Timer commands simply send messages to the background
-  function startTimer() {
-    if (continuousSetting) {
-      // Always prompt for a session name in continuous mode
-      showModalInput("Enter session name:", currentSessionName, (name) => {
-        if (name.trim()) {
-          setSessionName(name.trim());
-          chrome.runtime.sendMessage({ action: "startTimer", sessionName: currentSessionName }, (response) => {
-            console.log("Timer started", response);
+  
+  // Display messages in the UI
+  function displayMessages() {
+    messagesContainer.innerHTML = '';
+    
+    messageHistory.forEach((msg) => {
+      const messageElement = createMessageElement(msg);
+      messagesContainer.appendChild(messageElement);
+    });
+    
+    // Scroll to bottom
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    
+    // Mark all messages as read
+    const unreadMessageIds = messageHistory
+      .filter(msg => !msg.read)
+      .map(msg => msg.timestamp);
+    
+    if (unreadMessageIds.length > 0) {
+      chrome.runtime.sendMessage({
+        type: 'markAsRead',
+        messageIds: unreadMessageIds
+      });
+      
+      // Reset unread count
+      unreadCount = 0;
+      updateUnreadBadge();
+    }
+  }
+  
+  // Create a message element
+  function createMessageElement(message) {
+    const messageDiv = document.createElement('div');
+    messageDiv.className = 'message';
+    
+    if (message.from === 'self') {
+      messageDiv.classList.add('self');
+    }
+    
+    if (!message.read) {
+      messageDiv.classList.add('unread');
+    }
+    
+    // Handle system messages
+    if (message.type === 'system') {
+      messageDiv.classList.add('system');
+      messageDiv.textContent = message.message || message.status;
+      return messageDiv;
+    }
+    
+    // Handle image messages
+    if (message.type === 'image' && message.imageData) {
+      const img = document.createElement('img');
+      img.src = message.imageData;
+      img.style.maxWidth = '100%';
+      img.style.borderRadius = '8px';
+      img.style.marginBottom = '8px';
+      messageDiv.appendChild(img);
+    } else {
+      // Regular text message
+      const messageText = document.createElement('div');
+      messageText.textContent = message.message;
+      messageDiv.appendChild(messageText);
+    }
+    
+    const timestamp = document.createElement('div');
+    timestamp.className = 'timestamp';
+    
+    // Format timestamp
+    const date = new Date(message.timestamp);
+    const timeString = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    timestamp.textContent = timeString;
+    
+    messageDiv.appendChild(timestamp);
+    return messageDiv;
+  }
+  
+  // Update unread badge
+  function updateUnreadBadge() {
+    // Remove existing badge if any
+    const existingBadge = document.querySelector('.notification-badge');
+    if (existingBadge) {
+      existingBadge.remove();
+    }
+    
+    // Add badge if there are unread messages
+    if (unreadCount > 0) {
+      const badge = document.createElement('div');
+      badge.className = 'notification-badge';
+      badge.textContent = unreadCount > 9 ? '9+' : unreadCount;
+      document.body.appendChild(badge);
+    }
+  }
+  
+  // Connect to server
+  function connectToServer() {
+    const ip = serverIpInput.value.trim();
+    if (!ip) return;
+    
+    // Save IP to storage for persistence
+    chrome.storage.local.set({ serverIp: ip });
+    currentServerIp = ip;
+    
+    // Update UI
+    connectionStatus.textContent = 'Connecting...';
+    connectButton.disabled = true;
+    
+    // Send connect message to background script
+    chrome.runtime.sendMessage({
+      type: 'connectTo',
+      ip: ip
+    });
+  }
+  
+  // Send message
+  function sendMessage() {
+    const message = messageInput.value.trim();
+    
+    // Don't send if not connected or both message and image are empty
+    if (!isConnected || (!message && !imageData)) return;
+    
+    if (imageData) {
+      // Send image message
+      const imageMessage = {
+        type: 'sendImageMessage',
+        imageData: imageData,
+        timestamp: new Date().toISOString()
+      };
+      
+      // Send to background script to relay to server
+      chrome.runtime.sendMessage(imageMessage);
+      
+      // Add to local message history
+      const localImageMessage = {
+        type: 'image',
+        imageData: imageData,
+        from: 'self',
+        timestamp: new Date().toISOString()
+      };
+      
+      messageHistory.push(localImageMessage);
+      displayMessages();
+      
+      // Clear image data
+      imageData = null;
+      imagePreviewContainer.style.display = 'none';
+    }
+    
+    if (message) {
+      // Send text message
+      const messageObj = {
+        type: 'chat',
+        message: message,
+        from: 'self',
+        timestamp: new Date().toISOString()
+      };
+      
+      // Send to background script to relay to server
+      chrome.runtime.sendMessage({
+        type: 'sendMessage',
+        ...messageObj
+      });
+      
+      // Add to local message history
+      messageHistory.push(messageObj);
+      displayMessages();
+      
+      // Clear input
+      messageInput.value = '';
+    }
+    
+    // Focus on message input
+    messageInput.focus();
+  }
+  
+  // Handle paste event for images
+  document.addEventListener('paste', (e) => {
+    if (!isConnected) return;
+    
+    const items = e.clipboardData.items;
+    
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.indexOf('image') !== -1) {
+        // Get image from clipboard
+        const blob = items[i].getAsFile();
+        const reader = new FileReader();
+        
+        reader.onload = (event) => {
+          // Set image data
+          imageData = event.target.result;
+          
+          // Show preview
+          previewImage.src = imageData;
+          imagePreviewContainer.style.display = 'block';
+        };
+        
+        reader.readAsDataURL(blob);
+        break;
+      }
+    }
+  });
+  
+  // Handle drag and drop for images
+  messageInput.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    messageInput.classList.add('drag-over');
+  });
+  
+  messageInput.addEventListener('dragleave', () => {
+    messageInput.classList.remove('drag-over');
+  });
+  
+  messageInput.addEventListener('drop', (e) => {
+    e.preventDefault();
+    messageInput.classList.remove('drag-over');
+    
+    if (!isConnected) return;
+    
+    const files = e.dataTransfer.files;
+    
+    if (files.length > 0 && files[0].type.indexOf('image') !== -1) {
+      const reader = new FileReader();
+      
+      reader.onload = (event) => {
+        // Set image data
+        imageData = event.target.result;
+        
+        // Show preview
+        previewImage.src = imageData;
+        imagePreviewContainer.style.display = 'block';
+      };
+      
+      reader.readAsDataURL(files[0]);
+    }
+  });
+  
+  // Clear message history
+  clearHistoryButton.addEventListener("click", () => {
+    if (confirm('Are you sure you want to clear all message history?')) {
+      chrome.runtime.sendMessage({ type: 'clearHistory' }, () => {
+        messageHistory = [];
+        displayMessages();
+      });
+    }
+  });
+  
+  // Connect button event
+  connectButton.addEventListener("click", connectToServer);
+  
+  // Server IP input enter key
+  serverIpInput.addEventListener("keypress", (e) => {
+    if (e.key === 'Enter') {
+      connectToServer();
+    }
+  });
+  
+  // Send button event
+  sendButton.addEventListener("click", sendMessage);
+  
+  // Message input enter key
+  messageInput.addEventListener("keypress", (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+  });
+  
+  // Handle connection status updates
+  function updateConnectionStatus(status, message = '') {
+    isConnected = status === 'Connected';
+    
+    // Update UI elements
+    connectionStatus.textContent = message || status;
+    connectButton.disabled = status === 'Connecting';
+    messageInput.disabled = !isConnected;
+    sendButton.disabled = !isConnected;
+    
+    // Set status color
+    connectionStatus.className = '';
+    if (status === 'Connected') {
+      connectionStatus.classList.add('connected');
+    } else if (status === 'Error') {
+      connectionStatus.classList.add('error');
+    }
+    
+    // Update server IP input if connected
+    if (isConnected && currentServerIp) {
+      serverIpInput.value = currentServerIp;
+    }
+    
+    // Focus on message input if connected
+    if (isConnected) {
+      messageInput.focus();
+    }
+  }
+  
+  // Listen for messages from background script
+  chrome.runtime.onMessage.addListener((message) => {
+    console.log('Received message in popup:', message);
+    
+    if (message.type === 'connectionStatus') {
+      updateConnectionStatus(message.status, message.message);
+      if (message.serverIp) {
+        currentServerIp = message.serverIp;
+        serverIpInput.value = currentServerIp;
+      }
+    } else if (message.type === 'chat' || message.type === 'system' || message.type === 'image') {
+      // Add message to history
+      messageHistory.push(message);
+      
+      // Update UI if popup is visible
+      if (document.visibilityState === 'visible') {
+        displayMessages();
+      } else {
+        // Increment unread count if popup is not visible
+        unreadCount++;
+        updateUnreadBadge();
+        
+        // Show notification if enabled
+        if (notificationsEnabled) {
+          let notificationBody = '';
+          
+          if (message.type === 'chat') {
+            notificationBody = `${message.from}: ${message.message}`;
+          } else if (message.type === 'image') {
+            notificationBody = `${message.from} sent an image`;
+          } else {
+            notificationBody = message.message || message.status;
+          }
+          
+          new Notification('Local Chat Pro', {
+            body: notificationBody,
+            icon: 'icons/icon128.png'
           });
         }
-      });
-    } else {
-      // If user had previously set a session name, keep it
-      chrome.runtime.sendMessage({ action: "startTimer", sessionName: currentSessionName }, (response) => {
-        console.log("Timer started", response);
-      });
+      }
     }
-  }
-
-  function stopTimer() {
-    const previousSession = currentSessionName; // Store the current session name
-
-    chrome.runtime.sendMessage({ action: "stopTimer", sessionName: previousSession }, (response) => {
-      console.log("Timer stopped", response);
-      loadSessions(); // Update the sessions list
-
-      if (continuousSetting) {
-        // In continuous mode, prompt for a new session name but do not clear the previous name if you want persistence.
-        showModalInput("Enter name for next session:", currentSessionName, (name) => {
-          if (name.trim()) {
-            setSessionName(name.trim());
-            // Reset timer first
-            chrome.runtime.sendMessage({ action: "resetTimer" }, () => {
-              // Then start new session immediately
-              chrome.runtime.sendMessage({ action: "startTimer", sessionName: currentSessionName }, (resp) => {
-                console.log("Timer restarted for continuous timing", resp);
-              });
-            });
-          }
-        });
-      } else {
-        // In non-continuous mode, you may choose to leave the session name as is.
-        // setSessionName(""); // Remove or comment this out to keep the session name persistent.
+  });
+  
+  // Handle visibility change
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      // Mark messages as read when popup becomes visible
+      displayMessages();
+    }
+  });
+  
+  // Initialize
+  function initialize() {
+    // Load settings
+    loadSettings();
+    
+    // Load saved server IP
+    chrome.storage.local.get(['serverIp'], (result) => {
+      if (result.serverIp) {
+        serverIpInput.value = result.serverIp;
+        currentServerIp = result.serverIp;
       }
     });
-  }
-
-  function resetTimer() {
-    chrome.runtime.sendMessage({ action: "resetTimer" }, (response) => {
-      console.log("Timer reset", response);
-    });
-  }
-
-  startButton.addEventListener("click", startTimer);
-  stopButton.addEventListener("click", stopTimer);
-  resetButton.addEventListener("click", resetTimer);
-
-  // Update display every second
-  setInterval(updateDisplay, 1000);
-
-  // --- VIEW MANAGEMENT (TIMER, PLANNER, SETTINGS) ---
-  const timerContainer = document.getElementById("timerContainer");
-  const sessionsDiv = document.getElementById("sessions");
-  const settingsDiv = document.getElementById("settings");
-  const settingsBtn = document.getElementById("settingsBtn");
-  const sessionsBtn = document.getElementById("sessionsBtn");
-  const exportBtn = document.getElementById("export-md-btn");
-
-  function showView(viewDiv) {
-    timerContainer.style.display = "none";
-    sessionsDiv.style.display = "none";
-    settingsDiv.style.display = "none";
-    viewDiv.style.display = "block";
-    viewDiv.classList.remove("fade-in");
-    void viewDiv.offsetWidth;
-    viewDiv.classList.add("fade-in");
-  }
-
-  settingsBtn.addEventListener("click", () => {
-    showView(settingsDiv);
-    initSettings();
-  });
-
-  sessionsBtn.addEventListener("click", () => {
-    showView(sessionsDiv);
-    loadSessions();
-  });
-
-  exportBtn.addEventListener("click", () => {
-    chrome.runtime.sendMessage({ action: "exportMarkdown" }, (response) => {
-      const mdWindow = window.open("", "_blank");
-      mdWindow.document.write("<pre>" + response.markdown + "</pre>");
-    });
-  });
-
-  function showTimerView() {
-    showView(timerContainer);
-  }
-  showTimerView();
-
-  // --- SETTINGS VIEW ---
-  function initSettings() {
-    settingsDiv.innerHTML = `
-      <h2 style="margin-top: 0;">Settings</h2>
-      <div style="margin-bottom: 10px;">
-        <label>
-          Dark Mode:
-          <input type="checkbox" id="enableDarkMode" />
-        </label>
-      </div>
-      <div style="margin-bottom: 10px;">
-        <label>
-          Continuous Timing:
-          <input type="checkbox" id="continuousTiming" />
-        </label>
-      </div>
-      <div style="margin-top: 10px; text-align: center;">
-        <button id="saveSettingsBtn" style="margin-right: 10px;">Save Settings</button>
-        <button id="backFromSettingsBtn">Back</button>
-      </div>
-    `;
-    const saveBtn = document.getElementById("saveSettingsBtn");
-    const backBtn = document.getElementById("backFromSettingsBtn");
-    const darkModeCheckbox = document.getElementById("enableDarkMode");
-    const continuousCheckbox = document.getElementById("continuousTiming");
-    chrome.storage.sync.get(["enableDarkMode", "continuousTiming"], (data) => {
-      darkModeCheckbox.checked = data.enableDarkMode || false;
-      continuousCheckbox.checked = data.continuousTiming || false;
-      updateDarkMode(data.enableDarkMode);
-      continuousSetting = data.continuousTiming || false;
-    });
-    saveBtn.addEventListener("click", () => {
-      const newDark = darkModeCheckbox.checked;
-      const newContinuous = continuousCheckbox.checked;
-      chrome.storage.sync.set({ enableDarkMode: newDark, continuousTiming: newContinuous }, () => {
-        console.log("Settings saved.");
-        showInlineNotification("Settings saved!");
-        updateDarkMode(newDark);
-        continuousSetting = newContinuous;
-        showTimerView();
-      });
-    });
-    backBtn.addEventListener("click", showTimerView);
-  }
-
-  function showInlineNotification(message) {
-    let notif = document.getElementById("notification");
-    if (!notif) {
-      notif = document.createElement("div");
-      notif.id = "notification";
-      document.body.appendChild(notif);
-    }
-    notif.textContent = message;
-    notif.style.opacity = "1";
-    setTimeout(() => {
-      notif.style.opacity = "0";
-    }, 3000);
-  }
-
-  // --- PLANNER VIEW (DRAG & DROP, IMPORT) ---
-  function loadSessions() {
-    chrome.runtime.sendMessage({ action: "getSessions" }, (response) => {
-      sessionsDiv.innerHTML = "";
-      if (!response.sessions) {
-        console.error("No sessions found in response");
-        return;
+    
+    // Get current connection status
+    chrome.runtime.sendMessage({ type: 'getStatus' }, (response) => {
+      if (response) {
+        updateConnectionStatus(response.status, response.message);
       }
-      const header = document.createElement("div");
-      header.className = "sessions-header";
-      header.textContent = "Planner";
-      sessionsDiv.appendChild(header);
-
-      const toolbar = document.createElement("div");
-      toolbar.className = "sessions-toolbar";
-      const backBtn = document.createElement("button");
-      backBtn.textContent = "Back";
-      backBtn.addEventListener("click", showTimerView);
-      toolbar.appendChild(backBtn);
-
-      const addBtn = document.createElement("button");
-      addBtn.textContent = "Add Session";
-      addBtn.addEventListener("click", () => {
-        showModalInput("Enter session name:", "", (name) => {
-          if (name) {
-            chrome.runtime.sendMessage({ action: "addSession", sessionName: name, elapsed: 0 }, () => {
-              loadSessions();
-            });
-          }
-        });
-      });
-      toolbar.appendChild(addBtn);
-
-      const importBtn = document.createElement("button");
-      importBtn.textContent = "Import Planner";
-      importBtn.addEventListener("click", () => {
-        showModalTextarea("Paste planner markdown:", "", (imported) => {
-          if (imported) {
-            const lines = imported.split("\n").filter(line => line.trim() !== "");
-            const sessions = [];
-            lines.forEach(line => {
-              // Expect format: "1. Session Name — HH:MM:SS"
-              const parts = line.split("—");
-              if (parts.length >= 2) {
-                let namePart = parts[0].split(".")[1];
-                if (namePart) {
-                  namePart = namePart.trim();
-                } else {
-                  // Fallback: remove the numbering manually
-                  const dotIndex = parts[0].indexOf('.');
-                  namePart = parts[0].substring(dotIndex + 1).trim();
-                }
-                const timeStr = parts[1].trim();
-                const elapsed = parseTimeString(timeStr);
-                sessions.push({ name: namePart, elapsed: elapsed });
-              }
-            });
-            chrome.storage.sync.set({ sessions: sessions }, () => {
-              showInlineNotification("Planner imported.");
-              loadSessions();
-            });
-          }
-        });
-      });
-      toolbar.appendChild(importBtn);
-
-      sessionsDiv.appendChild(toolbar);
-
-      response.sessions.forEach((session, index) => {
-        const sessionCard = document.createElement("div");
-        sessionCard.className = "session";
-        sessionCard.draggable = true;
-        sessionCard.dataset.index = index;
-
-        // Drag events for reordering
-        sessionCard.addEventListener("dragstart", (e) => {
-          e.dataTransfer.setData("text/plain", index);
-        });
-        sessionCard.addEventListener("dragover", (e) => {
-          e.preventDefault();
-        });
-        sessionCard.addEventListener("drop", (e) => {
-          e.preventDefault();
-          const draggedIndex = parseInt(e.dataTransfer.getData("text/plain"));
-          const dropIndex = parseInt(sessionCard.dataset.index);
-          if (draggedIndex === dropIndex) return;
-          chrome.runtime.sendMessage({ action: "getSessions" }, (resp) => {
-            let sessions = resp.sessions;
-            const draggedSession = sessions.splice(draggedIndex, 1)[0];
-            sessions.splice(dropIndex, 0, draggedSession);
-            chrome.runtime.sendMessage({ action: "reorderSessions", sessions: sessions }, (res) => {
-              console.log("Sessions reordered", res);
-              loadSessions();
-            });
-          });
-        });
-
-        const infoDiv = document.createElement("div");
-        infoDiv.className = "session-info";
-        infoDiv.textContent = `${index + 1}. ${session.name || "Unnamed"} — ${formatTime(session.elapsed)}`;
-        sessionCard.appendChild(infoDiv);
-
-        // Options toggle button
-        const optionsToggle = document.createElement("button");
-        optionsToggle.className = "options-toggle";
-        optionsToggle.textContent = "⋮";
-        sessionCard.appendChild(optionsToggle);
-
-        // Hidden options menu
-        const optionsMenu = document.createElement("div");
-        optionsMenu.className = "options-menu";
-
-        // Delete button
-        const delBtn = document.createElement("button");
-        delBtn.className = "delete-btn";
-        delBtn.title = "Delete Session";
-        delBtn.addEventListener("click", () => {
-          chrome.runtime.sendMessage({ action: "deleteSession", index: index }, () => {
-            loadSessions();
-          });
-        });
-        optionsMenu.appendChild(delBtn);
-
-        // Edit button
-        const editBtn = document.createElement("button");
-        editBtn.className = "edit-btn";
-        editBtn.title = "Edit Session";
-        editBtn.addEventListener("click", () => {
-          showModalInputTwo(
-            "Enter new session name:",
-            session.name,
-            "Enter new session time (HH:MM:SS):",
-            formatTime(session.elapsed),
-            (newName, newTimeStr) => {
-              const newElapsed = parseTimeString(newTimeStr);
-              chrome.runtime.sendMessage({
-                action: "editSession",
-                index: index,
-                newName: newName || session.name,
-                newElapsed: newElapsed
-              }, () => {
-                loadSessions();
-              });
-            }
-          );
-        });
-        optionsMenu.appendChild(editBtn);
-
-        sessionCard.appendChild(optionsMenu);
-
-        optionsToggle.addEventListener("click", () => {
-          optionsMenu.classList.toggle("show");
-        });
-
-        sessionsDiv.appendChild(sessionCard);
-      });
     });
+    
+    // Load message history
+    loadMessageHistory();
   }
-
-  function parseTimeString(timeStr) {
-    const parts = timeStr.split(":");
-    if (parts.length !== 3) return 0;
-    const hours = parseInt(parts[0], 10);
-    const minutes = parseInt(parts[1], 10);
-    const seconds = parseInt(parts[2], 10);
-    return ((hours * 3600) + (minutes * 60) + seconds) * 1000;
-  }
-
-  // Modal helpers
-  function showModalInput(message, defaultValue, callback) {
-    let overlay = document.createElement("div");
-    overlay.className = "modal-overlay";
-    let container = document.createElement("div");
-    container.className = "modal-container";
-    let p = document.createElement("p");
-    p.textContent = message;
-    let input = document.createElement("input");
-    input.type = "text";
-    input.value = defaultValue || "";
-    input.style.width = "100%";
-    input.style.marginTop = "10px";
-    let submitButton = document.createElement("button");
-    submitButton.textContent = "Submit";
-    submitButton.style.marginTop = "10px";
-    submitButton.addEventListener("click", () => {
-      callback(input.value);
-      document.body.removeChild(overlay);
-    });
-    container.appendChild(p);
-    container.appendChild(input);
-    container.appendChild(submitButton);
-    overlay.appendChild(container);
-    document.body.appendChild(overlay);
-  }
-
-  function showModalInputTwo(msg1, default1, msg2, default2, callback) {
-    let overlay = document.createElement("div");
-    overlay.className = "modal-overlay";
-    let container = document.createElement("div");
-    container.className = "modal-container";
-    let p1 = document.createElement("p");
-    p1.textContent = msg1;
-    let input1 = document.createElement("input");
-    input1.type = "text";
-    input1.value = default1 || "";
-    input1.style.width = "100%";
-    input1.style.marginTop = "10px";
-    let p2 = document.createElement("p");
-    p2.textContent = msg2;
-    p2.style.marginTop = "10px";
-    let input2 = document.createElement("input");
-    input2.type = "text";
-    input2.value = default2 || "";
-    input2.style.width = "100%";
-    input2.style.marginTop = "10px";
-    let submitButton = document.createElement("button");
-    submitButton.textContent = "Submit";
-    submitButton.style.marginTop = "10px";
-    submitButton.addEventListener("click", () => {
-      callback(input1.value, input2.value);
-      document.body.removeChild(overlay);
-    });
-    container.appendChild(p1);
-    container.appendChild(input1);
-    container.appendChild(p2);
-    container.appendChild(input2);
-    container.appendChild(submitButton);
-    overlay.appendChild(container);
-    document.body.appendChild(overlay);
-  }
-
-  function showModalTextarea(message, defaultValue, callback) {
-    let overlay = document.createElement("div");
-    overlay.className = "modal-overlay";
-    let container = document.createElement("div");
-    container.className = "modal-container";
-    let p = document.createElement("p");
-    p.textContent = message;
-    let textarea = document.createElement("textarea");
-    textarea.value = defaultValue || "";
-    textarea.style.width = "100%";
-    textarea.style.height = "150px";
-    textarea.style.marginTop = "10px";
-    let submitButton = document.createElement("button");
-    submitButton.textContent = "Submit";
-    submitButton.style.marginTop = "10px";
-    submitButton.addEventListener("click", () => {
-      callback(textarea.value);
-      document.body.removeChild(overlay);
-    });
-    container.appendChild(p);
-    container.appendChild(textarea);
-    container.appendChild(submitButton);
-    overlay.appendChild(container);
-    document.body.appendChild(overlay);
-  }
-
-  // Function to handle dark mode toggle
-  function updateDarkMode(enabled) {
-    if (enabled) {
-      document.body.classList.add("dark-mode");
-    } else {
-      document.body.classList.remove("dark-mode");
-    }
-  }
-
-  // Initialize dark mode on load
-  chrome.storage.sync.get(["enableDarkMode"], (data) => {
-    updateDarkMode(data.enableDarkMode || false);
-  });
+  
+  // Start initialization
+  initialize();
 });

@@ -4,439 +4,99 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Local Chat Pro</title>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-  <style>
-    :root {
-      --primary-color: #2563eb;
-      --secondary-color: #1e40af;
-      --success-color: #16a34a;
-      --danger-color: #dc2626;
-      --text-color: var(--light-text);
-      --bg-color: var(--light-bg);
-      --bg-secondary: var(--light-bg-secondary);
-      --border-color: var(--light-border);
-
-      /* Light theme colors */
-      --light-text: #1f2937;
-      --light-bg: #ffffff;
-      --light-bg-secondary: #f3f4f6;
-      --light-border: #e5e7eb;
-
-      /* Dark theme colors */
-      --dark-text: #e5e7eb;
-      --dark-bg: #1f2937;
-      --dark-bg-secondary: #374151;
-      --dark-border: #4b5563;
-    }
-
-    [data-theme="dark"] {
-      --text-color: var(--dark-text);
-      --bg-color: var(--dark-bg);
-      --bg-secondary: var(--dark-bg-secondary);
-      --border-color: var(--dark-border);
-    }
-
-    body {
-      width: 400px;
-      padding: 16px;
-      font-family: 'Inter', sans-serif;
-      margin: 0;
-      color: var(--text-color);
-      background: var(--bg-color);
-    }
-
-    .header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 16px;
-      padding-bottom: 12px;
-      border-bottom: 1px solid var(--border-color);
-    }
-
-    .logo-section {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-
-    .logo {
-      width: 32px;
-      height: 32px;
-    }
-
-    .title {
-      font-size: 18px;
-      font-weight: 600;
-      color: var(--primary-color);
-      margin: 0;
-    }
-
-    .settings-button {
-      background: none;
-      border: none;
-      cursor: pointer;
-      padding: 8px;
-      color: var(--text-color);
-      border-radius: 4px;
-    }
-
-    .settings-button:hover {
-      background: var(--bg-secondary);
-    }
-
-    .settings-panel {
-      display: none;
-      background: var(--bg-secondary);
-      padding: 12px;
-      border-radius: 8px;
-      margin-bottom: 16px;
-    }
-
-    .settings-panel.visible {
-      display: block;
-    }
-
-    .setting-row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 8px;
-    }
-
-    .setting-row label {
-      font-size: 14px;
-      font-weight: 500;
-    }
-
-    #connection-status {
-      margin-bottom: 12px;
-      font-weight: 500;
-      padding: 8px 12px;
-      border-radius: 6px;
-      background: var(--bg-secondary);
-      text-align: center;
-      transition: all 0.3s;
-    }
-
-    #server-controls {
-      display: flex;
-      gap: 8px;
-      margin-bottom: 12px;
-    }
-
-    #server-ip {
-      flex-grow: 1;
-      padding: 8px 12px;
-      border: 1px solid var(--border-color);
-      border-radius: 6px;
-      font-size: 14px;
-    }
-
-    #connect-button {
-      padding: 8px 16px;
-      background: var(--primary-color);
-      color: white;
-      border: none;
-      border-radius: 6px;
-      cursor: pointer;
-      font-weight: 500;
-      transition: background-color 0.2s;
-    }
-
-    #connect-button:hover {
-      background: var(--secondary-color);
-    }
-
-    #messages {
-      height: 300px;
-      overflow-y: auto;
-      margin-bottom: 12px;
-      border: 1px solid var(--border-color);
-      padding: 12px;
-      border-radius: 6px;
-      background: white;
-    }
-
-    .message {
-      margin: 8px;
-      padding: 10px 14px;
-      border-radius: 12px;
-      background: var(--bg-secondary);
-      max-width: 80%;
-      word-wrap: break-word;
-      box-shadow: 0 1px 2px rgba(0,0,0,0.05);
-      animation: fadeIn 0.3s ease-out;
-      position: relative;
-    }
-
-    .message.self {
-      margin-left: auto;
-      background: var(--primary-color);
-      color: white;
-    }
-
-    .message.unread {
-      font-weight: 500;
-    }
-
-    .timestamp {
-      font-size: 12px;
-      color: var(--text-color);
-      margin-top: 4px;
-      opacity: 0.7;
-    }
-
-    .message.self .timestamp {
-      opacity: 0.8;
-    }
-
-    .input-area {
-      display: flex;
-      gap: 8px;
-      margin-top: 12px;
-    }
-
-    #message-input {
-      flex-grow: 1;
-      padding: 10px 14px;
-      border: 1px solid var(--border-color);
-      border-radius: 20px;
-      outline: none;
-      font-size: 14px;
-      transition: border-color 0.2s;
-    }
-
-    #message-input:focus {
-      border-color: var(--primary-color);
-    }
-
-    #message-input:disabled {
-      background: var(--bg-color);
-      color: var(--text-color);
-      cursor: not-allowed;
-    }
-
-    .action-button {
-      padding: 10px 16px;
-      border: none;
-      border-radius: 20px;
-      cursor: pointer;
-      font-weight: 500;
-      transition: background-color 0.2s;
-    }
-
-    #send-button {
-      background: var(--primary-color);
-      color: white;
-    }
-
-    #send-button:hover:not(:disabled) {
-      background: var(--secondary-color);
-    }
-
-    #send-button:disabled {
-      background: #ccc;
-      cursor: not-allowed;
-    }
-
-    .input-container {
-      border: 1px solid var(--border-color);
-      border-radius: 8px;
-      margin-bottom: 8px;
-      overflow: hidden;
-    }
-
-    .image-preview {
-      display: none;
-      padding: 8px;
-      background: var(--bg-secondary);
-      position: relative;
-    }
-
-    .image-preview.visible {
-      display: block;
-    }
-
-    .image-preview img {
-      max-width: 200px;
-      max-height: 150px;
-      border-radius: 4px;
-      display: block;
-      margin: 0 auto;
-    }
-
-    #message-input.drag-over {
-      border-color: var(--primary-color);
-      background-color: rgba(37, 99, 235, 0.1);
-      box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2);
-    }
-
-    #message-input::placeholder {
-      transition: color 0.2s;
-    }
-
-    .remove-image {
-      position: absolute;
-      top: 4px;
-      right: 4px;
-      cursor: pointer;
-      background: rgba(0,0,0,0.5);
-      color: white;
-      border-radius: 50%;
-      padding: 4px;
-      line-height: 1;
-    }
-
-    #send-image-button {
-      background: var(--primary-color);
-      color: white;
-      padding: 8px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      width: 40px;
-    }
-    
-    #send-image-button:disabled {
-      background: #ccc;
-      cursor: not-allowed;
-    }
-    
-    #send-image-button:hover:not(:disabled) {
-      background: var(--secondary-color);
-    }
-    
-    /* Image message styles */
-    .message img {
-      display: block;
-      margin: 4px 0;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-      transition: transform 0.2s;
-    }
-
-    #clear-history {
-      background: var(--danger-color);
-      color: white;
-      margin-right: 8px;
-    }
-
-    #clear-history:hover {
-      background: #b91c1c;
-    }
-
-    .footer {
-      display: flex;
-      justify-content: flex-end;
-      margin-top: 12px;
-      padding-top: 12px;
-      border-top: 1px solid var(--border-color);
-    }
-
-    @keyframes fadeIn {
-      from { opacity: 0; transform: translateY(8px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
-
-    /* Toggle switch styles */
-    .switch {
-      position: relative;
-      display: inline-block;
-      width: 44px;
-      height: 24px;
-    }
-
-    .switch input {
-      opacity: 0;
-      width: 0;
-      height: 0;
-    }
-
-    .slider {
-      position: absolute;
-      cursor: pointer;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      background-color: var(--border-color);
-      transition: .4s;
-      border-radius: 24px;
-    }
-
-    .slider:before {
-      position: absolute;
-      content: "";
-      height: 18px;
-      width: 18px;
-      left: 3px;
-      bottom: 3px;
-      background-color: white;
-      transition: .4s;
-      border-radius: 50%;
-    }
-
-    input:checked + .slider {
-      background-color: var(--primary-color);
-    }
-
-    input:checked + .slider:before {
-      transform: translateX(20px);
-    }
-  </style>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,100..700,0..1,0..200" rel="stylesheet">
+  <link rel="stylesheet" href="css/popup.css">
 </head>
 <body>
-  <div class="header">
-    <div class="logo-section">
-      <img src="icons/icon48.png" alt="Local Chat Pro" class="logo">
-      <h1 class="title">Local Chat Pro</h1>
-    </div>
-    <button id="settings-toggle" class="settings-button">⚙️</button>
-  </div>
-
-  <div id="settings-panel" class="settings-panel">
-    <div class="setting-row">
-      <label for="notification-toggle">Desktop Notifications</label>
-      <label class="switch">
-        <input type="checkbox" id="notification-toggle">
-        <span class="slider"></span>
-      </label>
-    </div>
-    <div class="setting-row">
-      <label for="dark-mode-toggle">Dark Mode</label>
-      <label class="switch">
-        <input type="checkbox" id="dark-mode-toggle">
-        <span class="slider"></span>
-      </label>
-    </div>
-  </div>
-
-  <div id="connection-status">Connecting...</div>
-  
-  <div id="server-controls">
-    <input type="text" id="server-ip" placeholder="Enter server IP...">
-    <button id="connect-button">Connect</button>
-  </div>
-
-  <div id="messages"></div>
-
-  <div class="input-area">
-    <div class="input-container">
-      <div class="image-preview" id="image-preview">
-        <span class="remove-image" id="remove-image">×</span>
-        <img id="preview-img">
+  <div class="app-container">
+    <div class="header">
+      <div class="logo-section">
+        <img src="icons/icon48.png" alt="Local Chat Pro" class="logo">
+        <h1 class="title">Local Chat Pro</h1>
       </div>
-      <input type="text" id="message-input" placeholder="Type a message..." disabled>
-      <button id="send-button" class="action-button" disabled>Send</button>
+      <div class="header-actions">
+        <button id="settings-toggle" class="icon-button" title="Settings">
+          <span class="material-symbols-rounded">settings</span>
+        </button>
+      </div>
+    </div>
+
+    <div id="settings-panel" class="settings-panel" style="display: none;">
+      <div class="settings-header">
+        <h2 class="settings-title">Settings</h2>
+        <button id="close-settings" class="icon-button" title="Close settings">
+          <span class="material-symbols-rounded">close</span>
+        </button>
+      </div>
+      <div class="setting-row">
+        <label for="notification-toggle">Desktop Notifications</label>
+        <label class="switch">
+          <input type="checkbox" id="notification-toggle">
+          <span class="slider"></span>
+        </label>
+      </div>
+      <div class="setting-row">
+        <label for="dark-mode-toggle">Dark Mode</label>
+        <label class="switch">
+          <input type="checkbox" id="dark-mode-toggle">
+          <span class="slider"></span>
+        </label>
+      </div>
+      <div class="setting-row">
+        <label for="username-input">Your Display Name</label>
+        <input type="text" id="username-input" placeholder="Enter your name" maxlength="20">
+      </div>
+    </div>
+
+    <div class="connection-bar">
+      <div id="connection-status">Connecting...</div>
       
-      <input type="file" id="image-input" accept="image/*" style="display:none">
+      <div id="server-controls">
+        <input type="text" id="server-ip" placeholder="Enter server IP...">
+        <button id="connect-button">Connect</button>
+      </div>
+    </div>
+
+    <div class="messages-container">
+      <div id="messages"></div>
+      <div class="typing-indicator">
+        <span class="typing-user"></span> is typing
+        <div class="typing-dot"></div>
+        <div class="typing-dot"></div>
+        <div class="typing-dot"></div>
+      </div>
+    </div>
+
+    <div class="input-area">
+      <div class="input-container">
+        <!-- Image preview will be inserted here by JavaScript -->
+        <div class="message-input-row">
+          <button id="emoji-button" class="emoji-button" title="Add emoji">
+            <span class="material-symbols-rounded">sentiment_satisfied</span>
+          </button>
+          <input type="text" id="message-input" placeholder="Type a message..." disabled>
+          <button id="send-button" class="action-button" disabled title="Send message">
+            <span class="material-symbols-rounded">send</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="footer">
+      <span class="footer-text">Messages are end-to-end encrypted</span>
+      <button id="clear-history" class="action-button">
+        <span class="material-symbols-rounded">delete</span>
+        Clear History
+      </button>
+    </div>
+    
+    <div class="emoji-picker" id="emoji-picker">
+      <!-- Emojis will be added by JavaScript -->
     </div>
   </div>
 
-  <div class="footer">
-    <button id="clear-history" class="action-button">Clear History</button>
-  </div>
-
-  <script src="popup.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/popup.js"></script>
 </body>
 </html>
